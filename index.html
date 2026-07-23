@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="mocha">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ayyp — v1 floating</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root[data-theme="mocha"] {
+      --base: #1e1e2e; --mantle: #181825; --surface: #313244; --overlay: #6c7086;
+      --text: #cdd6f4; --subtext: #a6adc8; --green: #a6e3a1; --blue: #89b4fa;
+      --mauve: #cba6f7; --peach: #fab387; --teal: #94e2d5; --sky: #89dceb; --red: #f38ba8;
+    }
+    :root[data-theme="latte"] {
+      --base: #eff1f5; --mantle: #e6e9ef; --surface: #ccd0da; --overlay: #9ca0b0;
+      --text: #4c4f69; --subtext: #6c6f85; --green: #40a02b; --blue: #1e66f5;
+      --mauve: #8839ef; --peach: #fe640b; --teal: #179299; --sky: #04a5e5; --red: #d20f39;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Lucida Console', monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      background: var(--base);
+      color: var(--text);
+      padding: 3.5rem 0 3.5rem;
+      transition: background 0.2s, color 0.2s;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .muted { color: var(--overlay); }
+
+    /* ── TMUX TOP BAR ── */
+    .tmux-top {
+      position: fixed; top: 0; left: 0; right: 0; height: 2rem;
+      background: var(--mantle); border-bottom: 1px solid var(--surface);
+      display: flex; align-items: center; padding: 0 1rem; gap: 1rem;
+      z-index: 200; font-size: 12px;
+    }
+    .tmux-top .session { color: var(--green); font-weight: bold; }
+    .tmux-top .spacer  { flex: 1; }
+    .tmux-top #clock   { color: var(--subtext); }
+
+    #toggle {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--overlay);
+      font-family: 'Lucida Console', monospace; font-size: 11px;
+      padding: 0.1rem 0.6rem; cursor: pointer;
+    }
+    #toggle:hover { border-color: var(--green); color: var(--green); }
+
+    /* ── TMUX BOTTOM BAR ── */
+    .tmux-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; height: 2rem;
+      background: var(--mantle); border-top: 1px solid var(--surface);
+      display: flex; align-items: center;
+      z-index: 200; font-size: 12px; overflow-x: auto;
+    }
+    .tmux-bar a {
+      color: var(--subtext); padding: 0 0.9rem;
+      border-right: 1px solid var(--surface);
+      text-decoration: none; white-space: nowrap; line-height: 2rem;
+    }
+    .tmux-bar a:hover { color: var(--text); background: var(--surface); }
+    .tmux-bar .active { color: var(--base); background: var(--green); }
+
+    .windows {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding: 0.5rem 1.5rem;
+    }
+
+    .win {
+      background: var(--mantle);
+      border: 1px solid var(--surface);
+      width: 58%;
+      margin-bottom: -2rem;
+      position: relative;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+      transition: border-color 0.15s;
+    }
+    .win:hover { border-color: var(--overlay); }
+    .win.win-hl { border-color: var(--green); box-shadow: 0 0 14px rgba(166,227,161,0.25); }
+    /* left windows sit on the left half, right on the right — no horizontal overlap */
+    .win:nth-child(odd)  { align-self: flex-start; margin-left: 0; }
+    .win:nth-child(even) { align-self: flex-end;   margin-right: 0; }
+    .win:nth-child(3) { transform: rotate(-0.4deg); }
+    .win:nth-child(5) { transform: rotate(0.3deg); }
+    .win:nth-child(7) { transform: rotate(-0.2deg); }
+
+    /* title bar */
+    .titlebar {
+      background: var(--surface);
+      padding: 0.4rem 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      border-bottom: 1px solid var(--overlay);
+      user-select: none;
+    }
+    .dots { display: flex; gap: 0.4rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #f38ba8; }
+    .dot-y { background: #f9e2af; }
+    .dot-g { background: #a6e3a1; }
+    .titlebar .cmd { color: var(--green); font-size: 0.95em; margin-left: 0.3rem; font-weight: bold; }
+
+    /* body */
+    .win-body { padding: 1rem 1.2rem 2rem; }
+    .win-body.centered { display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .prompt { color: var(--green); margin-bottom: 0.4rem; font-size: 0.82em; }
+    .prompt::before { content: '$ '; }
+
+    .hero-name { font-size: 1.8rem; font-weight: bold; color: var(--mauve); line-height: 1.2; }
+    .hero-handle { color: var(--green); }
+    .tagline { color: var(--subtext); font-style: italic; margin-top: 0.2rem; }
+
+    .entry { margin-bottom: 0.8rem; }
+    .label { color: var(--peach); }
+    .sub { color: var(--subtext); }
+    .sub::before { content: '  └ '; color: var(--overlay); }
+
+    .log-list { list-style: none; }
+    .log-list li { display: flex; gap: 1.5ch; margin-bottom: 0.3rem; }
+    .log-list .ts { color: var(--overlay); white-space: nowrap; }
+
+    .ascii-art {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7em;
+      line-height: 1.2;
+      white-space: pre;
+      margin-top: 0.3rem;
+      margin-bottom: 0.8rem;
+    }
+    .cc-name   { color: var(--mauve); }
+    .cc-info   { padding-left: 0.3rem; }
+    .cc-full-name { font-size: 1.5rem; font-weight: bold; color: var(--peach); margin-top: 1rem; margin-bottom: 0.1rem; }
+    .cc-tagline { color: var(--subtext); font-style: italic; margin-bottom: 0.7rem; }
+    .cc-meta   { margin-top: 0.3rem; }
+    .cc-row    { display: flex; gap: 1.5ch; margin-bottom: 0.2rem; font-size: 0.9em; }
+    .cc-key    { color: var(--overlay); min-width: 9ch; }
+    .cc-key::after { content: ':'; }
+    .cc-muted  { color: var(--overlay); }
+    .cc-link   { color: var(--blue); }
+
+    .cursor {
+      display: inline-block; width: 0.6ch; height: 1em;
+      background: var(--green); vertical-align: text-bottom;
+      animation: blink 1.1s step-start infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    @media (max-width: 600px) {
+      .win { width: 100% !important; transform: none !important; margin-bottom: 0 !important; align-self: auto !important; }
+      #about, #experience { margin-top: 0 !important; }
+      .windows { padding: 0.5rem 0.75rem; gap: 0.75rem; }
+      .win-body { padding: 0.8rem 1rem 1.5rem; }
+      #about .win-body { padding-bottom: 1.5rem !important; }
+      .tmux-bar { overflow-x: visible; }
+      .tmux-bar a { flex: 1; text-align: center; font-size: 9px; padding: 0; border-right: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="tmux-top">
+    <span class="session">ayyp@earth</span>
+    <span class="muted">·</span>
+    <span class="muted">0:profile*</span>
+    <span class="spacer"></span>
+    <button id="toggle">latte</button>
+    <span id="clock"></span>
+  </div>
+
+  <div class="windows">
+
+    <div class="win" style="width:90%">
+      <div class="titlebar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="cmd">whoami</span>
+      </div>
+      <div class="win-body centered">
+        <p class="prompt">whoami</p>
+        <canvas id="ascii-canvas"></canvas>
+        <p class="cc-full-name">Ashish K. Pokharel</p>
+      </div>
+    </div>
+
+    <div class="win" id="about" style="margin-top:3rem">
+      <div class="titlebar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="cmd">cat about.txt</span>
+      </div>
+      <div class="win-body" style="padding-bottom:5rem">
+        <p class="prompt">cat about.txt</p>
+        <p>AI Engineer. I build systems that think and ship.<br/>
+        Interested in applied AI, backend infrastructure,<br/>
+        and making intelligent products that work in production — not just demos.</p>
+      </div>
+    </div>
+
+    <div class="win" id="experience" style="margin-top:1rem">
+      <div class="titlebar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="cmd">ls -l ./experience</span>
+      </div>
+      <div class="win-body">
+        <p class="prompt">ls -l ./experience</p>
+        <div class="entry">
+          <p class="label">AI Engineer &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Apr 2026 — present</p>
+          <p class="sub"><span class="muted">[REDACTED]</span> · AI systems &amp; product development</p>
+        </div>
+        <div class="entry">
+          <p class="label">AI Systems Engineer  Aug 2025 — Apr 2026</p>
+          <p class="sub">Amoeba Labs · model integration &amp; production ML</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="win" id="projects">
+      <div class="titlebar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="cmd">ls ./projects/</span>
+      </div>
+      <div class="win-body">
+        <p class="prompt">ls ./projects/</p>
+        <div class="entry">
+          <p class="label"><a href="https://snappool.net">snappool</a></p>
+          <p class="sub">snappool.net</p>
+        </div>
+        <div class="entry">
+          <p class="label"><a href="https://github.com/ayyp1/WiFi-CSI-HAR">WiFi-CSI-HAR</a></p>
+          <p class="sub">human activity recognition via WiFi CSI signals</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="win" id="blog">
+      <div class="titlebar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="cmd">tail -n 5 blog.log</span>
+      </div>
+      <div class="win-body">
+        <p class="prompt">tail -n 5 blog.log</p>
+        <p>posts will appear here.<br/><span class="muted">// if i ever stop being a lazy ass.</span></p>
+      </div>
+    </div>
+
+    <div class="win" id="papers">
+      <div class="titlebar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="cmd">cat papers-read.bib</span>
+      </div>
+      <div class="win-body">
+        <p class="prompt">cat papers-read.bib</p>
+        <ul class="log-list">
+          <li><span class="ts">2017</span><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need</a></li>
+          <li><span class="ts">2018</span><a href="https://arxiv.org/abs/1810.04805">BERT: Pre-training of Deep Bidirectional Transformers</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="win" id="contact">
+      <div class="titlebar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="cmd">cat links.sh</span>
+      </div>
+      <div class="win-body">
+        <p class="prompt">cat links.sh</p>
+        <p><a href="https://github.com/ayyp1">github</a> &nbsp; <a href="https://www.linkedin.com/in/ashish-kumar-pokharel-03969a270/">linkedin</a> &nbsp; <a href="mailto:ashishkumar.pokharel@gmail.com">email</a></p>
+        <p style="margin-top:1rem"><span class="cursor"></span></p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="tmux-bar">
+    <a href="#" class="active">0:profile</a>
+    <a href="#about">1:about</a>
+    <a href="#experience">2:exp</a>
+    <a href="#projects">3:projects</a>
+    <a href="#blog">4:blog</a>
+    <a href="#papers">5:papers</a>
+    <a href="#contact">6:contact</a>
+  </div>
+
+  <script>
+    // render ascii art to canvas for pixel-perfect block chars
+    const art = [
+      '     ░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓███████▓▒░',
+      '    ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░',
+      '    ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░',
+      '    ░▒▓████████▓▒░░▒▓██████▓▒░ ░▒▓██████▓▒░░▒▓███████▓▒░',
+      '    ░▒▓█▓▒░░▒▓█▓▒░  ░▒▓█▓▒░      ░▒▓█▓▒░   ░▒▓█▓▒░',
+      '    ░▒▓█▓▒░░▒▓█▓▒░  ░▒▓█▓▒░      ░▒▓█▓▒░   ░▒▓█▓▒░',
+      '    ░▒▓█▓▒░░▒▓█▓▒░  ░▒▓█▓▒░      ░▒▓█▓▒░   ░▒▓█▓▒░',
+    ];
+
+    function drawArt() {
+      const canvas = document.getElementById('ascii-canvas');
+      const ctx = canvas.getContext('2d');
+      const fontSize = 11;
+      const lineH = 14;
+      const font = `${fontSize}px 'JetBrains Mono', monospace`;
+      ctx.font = font;
+      const cw = ctx.measureText('█').width;
+      const maxLen = Math.max(...art.map(l => l.length));
+      canvas.width  = Math.ceil(cw * maxLen);
+      canvas.height = lineH * art.length + 4;
+      canvas.style.maxWidth = '100%';
+      ctx.font = font;
+      const isDark = document.documentElement.dataset.theme !== 'latte';
+      ctx.fillStyle = isDark ? '#cba6f7' : '#8839ef';
+      art.forEach((line, i) => ctx.fillText(line, 0, (i + 1) * lineH));
+    }
+
+    drawArt();
+    document.getElementById('toggle').addEventListener('click', () => setTimeout(drawArt, 50));
+    window.addEventListener('resize', drawArt);
+
+    const cl = document.getElementById('clock');
+    const tick = () => cl.textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    tick(); setInterval(tick, 1000);
+
+    const btn = document.getElementById('toggle');
+    const root = document.documentElement;
+    btn.addEventListener('click', () => {
+      const next = root.dataset.theme === 'mocha' ? 'latte' : 'mocha';
+      root.dataset.theme = next;
+      btn.textContent = next === 'mocha' ? 'latte' : 'mocha';
+      localStorage.setItem('theme', next);
+    });
+    const saved = localStorage.getItem('theme');
+    if (saved) { root.dataset.theme = saved; btn.textContent = saved === 'mocha' ? 'latte' : 'mocha'; }
+
+    document.querySelectorAll('.tmux-bar a[href^="#"]').forEach(a => {
+      a.addEventListener('click', () => {
+        document.querySelectorAll('.win').forEach(w => w.classList.remove('win-hl'));
+        const id = a.getAttribute('href').slice(1);
+        if (id) document.getElementById(id)?.classList.add('win-hl');
+      });
+    });
+  </script>
+</body>
+</html>
