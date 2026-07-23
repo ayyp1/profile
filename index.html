@@ -336,6 +336,8 @@
     const saved = localStorage.getItem('theme');
     if (saved) { root.dataset.theme = saved; btn.textContent = saved === 'mocha' ? 'latte' : 'mocha'; }
 
+    document.querySelectorAll('a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+
     document.querySelectorAll('.tmux-bar a[href^="#"]').forEach(a => {
       a.addEventListener('click', () => {
         document.querySelectorAll('.win').forEach(w => w.classList.remove('win-hl'));
