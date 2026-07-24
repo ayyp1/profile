@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ayyp — v1 floating</title>
+  <title>ayyp@earth</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap" rel="stylesheet">
   <style>
@@ -317,8 +317,25 @@
       art.forEach((line, i) => ctx.fillText(line, 0, (i + 1) * lineH));
     }
 
-    drawArt();
-    document.getElementById('toggle').addEventListener('click', () => setTimeout(drawArt, 50));
+    function makeFavicon() {
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const ctx = c.getContext('2d');
+      const isDark = document.documentElement.dataset.theme !== 'latte';
+      ctx.fillStyle = isDark ? '#181825' : '#e6e9ef';
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = isDark ? '#cba6f7' : '#8839ef';
+      ctx.font = 'bold 56px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('a', 32, 34);
+      let link = document.querySelector("link[rel='icon']");
+      if (!link) { link = document.createElement('link'); document.head.appendChild(link); }
+      link.rel = 'icon'; link.href = c.toDataURL();
+    }
+
+    drawArt(); makeFavicon();
+    document.getElementById('toggle').addEventListener('click', () => setTimeout(() => { drawArt(); makeFavicon(); }, 50));
     window.addEventListener('resize', drawArt);
 
     const cl = document.getElementById('clock');
