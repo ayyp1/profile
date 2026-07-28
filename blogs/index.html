@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="mocha">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>blog — ayyp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root[data-theme="mocha"] {
+      --base: #1e1e2e; --mantle: #181825; --surface: #313244; --overlay: #6c7086;
+      --text: #cdd6f4; --subtext: #a6adc8; --green: #a6e3a1; --blue: #89b4fa;
+      --mauve: #cba6f7; --peach: #fab387; --red: #f38ba8;
+    }
+    :root[data-theme="latte"] {
+      --base: #eff1f5; --mantle: #e6e9ef; --surface: #ccd0da; --overlay: #9ca0b0;
+      --text: #4c4f69; --subtext: #6c6f85; --green: #40a02b; --blue: #1e66f5;
+      --mauve: #8839ef; --peach: #fe640b; --red: #d20f39;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--base);
+      color: var(--text);
+      min-height: 100vh;
+      transition: background 0.2s, color 0.2s;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--surface);
+    }
+    .nav-home {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      color: var(--mauve);
+      font-weight: 500;
+    }
+    .nav-home:hover { color: var(--mauve); opacity: 0.8; }
+    .nav-right { display: flex; align-items: center; gap: 1.5rem; }
+    .nav-link { color: var(--subtext); font-size: 0.85rem; }
+    .nav-link:hover { color: var(--text); }
+    #toggle {
+      background: none;
+      border: 1px solid var(--surface);
+      color: var(--subtext);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.6rem;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    #toggle:hover { border-color: var(--overlay); color: var(--text); }
+
+    /* ── MAIN ── */
+    main {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 4rem 2rem 6rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      color: var(--text);
+    }
+    .subtitle {
+      color: var(--subtext);
+      font-size: 0.9rem;
+      margin-bottom: 3rem;
+    }
+
+    /* ── POST LIST ── */
+    .post-list { display: flex; flex-direction: column; gap: 0; }
+
+    .post-item {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 0;
+      border-bottom: 1px solid var(--surface);
+      transition: color 0.15s;
+    }
+    .post-item:first-child { border-top: 1px solid var(--surface); }
+    .post-item:hover .post-title { color: var(--blue); }
+
+    .post-left { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
+    .post-title { font-size: 1rem; font-weight: 500; line-height: 1.4; }
+    .post-desc { font-size: 0.82rem; color: var(--subtext); }
+    .post-tag {
+      font-size: 0.7rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--mauve);
+      background: color-mix(in srgb, var(--mauve) 12%, transparent);
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .post-date {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--overlay);
+      white-space: nowrap;
+    }
+
+    /* ── EMPTY STATE ── */
+    .empty {
+      padding: 3rem 0;
+      color: var(--overlay);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+    }
+    .empty::before { content: '// '; }
+
+    @media (max-width: 500px) {
+      main { padding: 2.5rem 1.25rem 4rem; }
+      nav { padding: 1rem 1.25rem; }
+      .post-item { flex-direction: column; gap: 0.4rem; }
+      .post-date { align-self: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/" class="nav-home">ayyp@earth</a>
+    <div class="nav-right">
+      <a href="/" class="nav-link">home</a>
+      <button id="toggle">latte</button>
+    </div>
+  </nav>
+
+  <main>
+    <h1>Blog</h1>
+    <p class="subtitle">writing on AI, systems, and things i find interesting.</p>
+
+    <div class="post-list">
+      <!-- posts go here:
+      <a class="post-item" href="/blogs/post-slug">
+        <div class="post-left">
+          <span class="post-title">Post Title Here</span>
+          <span class="post-desc">A short description of what this post is about.</span>
+        </div>
+        <span class="post-date">Jul 2026</span>
+      </a>
+      -->
+      <p class="empty">posts coming soon. maybe.</p>
+    </div>
+  </main>
+
+  <script>
+    const btn = document.getElementById('toggle');
+    const root = document.documentElement;
+    const saved = localStorage.getItem('theme');
+    if (saved) { root.dataset.theme = saved; btn.textContent = saved === 'mocha' ? 'latte' : 'mocha'; }
+    btn.addEventListener('click', () => {
+      const next = root.dataset.theme === 'mocha' ? 'latte' : 'mocha';
+      root.dataset.theme = next;
+      btn.textContent = next === 'mocha' ? 'latte' : 'mocha';
+      localStorage.setItem('theme', next);
+    });
+    document.querySelectorAll('a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+  </script>
+</body>
+</html>
