@@ -142,16 +142,16 @@
     <p class="subtitle">writing on AI, systems, and things i find interesting.</p>
 
     <div class="post-list">
-      <!-- posts go here:
-      <a class="post-item" href="/blogs/post-slug">
+      <a class="post-item" href="/blogs/training-gpt2">
         <div class="post-left">
-          <span class="post-title">Post Title Here</span>
-          <span class="post-desc">A short description of what this post is about.</span>
+          <span class="post-title">Training GPT-2: My Experience</span>
+          <span class="post-desc">From applying AI to understanding it — kernels, flash attention, and a lot of PyTorch relearning.</span>
         </div>
-        <span class="post-date">Jul 2026</span>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          <span class="post-tag">ml</span>
+          <span class="post-date">Aug 2026</span>
+        </div>
       </a>
-      -->
-      <p class="empty">posts coming soon. maybe.</p>
     </div>
   </main>
 
@@ -160,11 +160,29 @@
     const root = document.documentElement;
     const saved = localStorage.getItem('theme');
     if (saved) { root.dataset.theme = saved; btn.textContent = saved === 'mocha' ? 'latte' : 'mocha'; }
+    function makeFavicon() {
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const ctx = c.getContext('2d');
+      const isDark = document.documentElement.dataset.theme !== 'latte';
+      ctx.fillStyle = isDark ? '#181825' : '#e6e9ef';
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = isDark ? '#cba6f7' : '#8839ef';
+      ctx.font = 'bold 56px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('a', 32, 34);
+      let link = document.querySelector("link[rel='icon']");
+      if (!link) { link = document.createElement('link'); document.head.appendChild(link); }
+      link.rel = 'icon'; link.href = c.toDataURL();
+    }
+    makeFavicon();
     btn.addEventListener('click', () => {
       const next = root.dataset.theme === 'mocha' ? 'latte' : 'mocha';
       root.dataset.theme = next;
       btn.textContent = next === 'mocha' ? 'latte' : 'mocha';
       localStorage.setItem('theme', next);
+      makeFavicon();
     });
     document.querySelectorAll('a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
   </script>
