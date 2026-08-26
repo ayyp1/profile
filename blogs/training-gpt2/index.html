@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="mocha">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Training GPT-2: My Experience — ayyp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root[data-theme="mocha"] {
+      --base: #1e1e2e; --mantle: #181825; --surface: #313244; --overlay: #6c7086;
+      --text: #cdd6f4; --subtext: #a6adc8; --green: #a6e3a1; --blue: #89b4fa;
+      --mauve: #cba6f7; --peach: #fab387; --red: #f38ba8;
+    }
+    :root[data-theme="latte"] {
+      --base: #eff1f5; --mantle: #e6e9ef; --surface: #ccd0da; --overlay: #9ca0b0;
+      --text: #4c4f69; --subtext: #6c6f85; --green: #40a02b; --blue: #1e66f5;
+      --mauve: #8839ef; --peach: #fe640b; --red: #d20f39;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--base);
+      color: var(--text);
+      min-height: 100vh;
+      transition: background 0.2s, color 0.2s;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--surface);
+    }
+    .nav-home {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      color: var(--mauve);
+      font-weight: 500;
+      text-decoration: none;
+    }
+    .nav-home:hover { opacity: 0.8; text-decoration: none; }
+    .nav-right { display: flex; align-items: center; gap: 1.5rem; }
+    .nav-link { color: var(--subtext); font-size: 0.85rem; text-decoration: none; }
+    .nav-link:hover { color: var(--text); text-decoration: none; }
+    #toggle {
+      background: none;
+      border: 1px solid var(--surface);
+      color: var(--subtext);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.6rem;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    #toggle:hover { border-color: var(--overlay); color: var(--text); }
+
+    /* ── POST ── */
+    main {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 4rem 2rem 8rem;
+    }
+
+    .post-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .post-tag {
+      font-size: 0.7rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--mauve);
+      background: color-mix(in srgb, var(--mauve) 12%, transparent);
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+    }
+    .post-date {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--overlay);
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 600;
+      line-height: 1.25;
+      margin-bottom: 2.5rem;
+      color: var(--text);
+    }
+
+    .prose { line-height: 1.8; color: var(--text); }
+
+    .prose h2 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin: 2.5rem 0 1rem;
+      color: var(--text);
+    }
+
+    .prose p { margin-bottom: 1.25rem; }
+
+    .prose a { color: var(--blue); }
+
+    .prose pre {
+      background: var(--mantle);
+      border: 1px solid var(--surface);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin: 1.5rem 0;
+    }
+    .prose code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: var(--green);
+    }
+    .prose p code {
+      background: var(--mantle);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+      font-size: 0.82rem;
+    }
+
+    /* ── IMAGE PLACEHOLDER ── */
+    .img-slot {
+      width: 100%;
+      background: var(--mantle);
+      border: 1px dashed var(--surface);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2.5rem 1rem;
+      margin: 1.75rem 0;
+      color: var(--overlay);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      gap: 0.5rem;
+    }
+    .img-slot::before { content: '[ img ] '; color: var(--mauve); }
+
+    .prose img {
+      width: 100%;
+      border-radius: 8px;
+      margin: 1.75rem 0;
+      display: block;
+    }
+    .prose .img-small, .prose .img-small img {
+      max-width: 360px;
+      margin-left: auto;
+      margin-right: auto;
+      display: block;
+    }
+    .prose .img-row {
+      display: flex;
+      gap: 1rem;
+      margin: 1.75rem 0;
+      justify-content: center;
+    }
+    .prose .img-row img {
+      width: 50%;
+      max-width: 280px;
+      margin: 0;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+    .prose .img-row img:last-child {
+      object-position: right top;
+    }
+
+    .prose .caption {
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--overlay);
+      margin-top: -1.25rem;
+      margin-bottom: 1.75rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tbc {
+      margin-top: 2.5rem;
+      padding: 1rem 1.25rem;
+      background: color-mix(in srgb, var(--mauve) 8%, transparent);
+      border-left: 3px solid var(--mauve);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.88rem;
+      color: var(--subtext);
+      font-style: italic;
+    }
+
+    @media (max-width: 500px) {
+      main { padding: 2.5rem 1.25rem 5rem; }
+      nav { padding: 1rem 1.25rem; }
+      h1 { font-size: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/" class="nav-home">ayyp@earth</a>
+    <div class="nav-right">
+      <a href="/blogs" class="nav-link">blog</a>
+      <a href="/" class="nav-link">home</a>
+      <button id="toggle">latte</button>
+    </div>
+  </nav>
+
+  <main>
+    <div class="post-meta">
+      <span class="post-tag">ml</span>
+      <span class="post-date">Aug 2026</span>
+    </div>
+
+    <h1>Training GPT-2: My Experience</h1>
+
+    <article class="prose">
+
+      <img src="intial-background.jpg" alt="" style="max-height:320px;object-fit:cover;" />
+
+      <h2>Background</h2>
+
+      <p>
+        I've been working as an engineer for a year now. I graduated last year and had been working on
+        applied AI: building chatbots, RAG systems and agentic stuff. Don't get me wrong, this field is
+        amazing and I learnt so much from it. I learnt how backend systems work, I learnt how AI is integrated in products, and a lot of other things. But there was this feeling of dissatisfaction in my heart.
+        I wanted to dive deep. I wanted to work on something nobody else had worked on, something I would
+        be proud to show off.
+      </p>
+
+      <p>
+        So I decided to specialize in LLMs, specifically the low-level side, the part that sits close to
+        the hardware. Kernels, GPUs, the machinery underneath. I had a fairly justifiable maths background
+        (computer engineering) to lean on. I wanted to be on that side, but not in research; on the
+        engineering side. I already had enough foundational knowledge of ML and DL (up to sequential models).
+      </p>
+
+      <p>
+        I knew what Transformers were, but even with my love for mathematics I never dived deep into them.
+        Maybe it was my own laziness, maybe my busy schedule (excuses, smh). Then came the day I stumbled
+        upon <a href="https://x.com/thedankoe/status/2010751592346030461?s=20" target="_blank" rel="noopener">this post on X</a>. And I decided to change everything.
+      </p>
+
+      <p>I started with the holy grail.</p>
+
+      <a class="img-small" href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener" style="max-width:220px;">
+        <img src="transformers.webp" alt="Attention Is All You Need paper" />
+      </a>
+
+      <p>
+        I learned the mathematics behind it (fairly complex). Then I tried to code it, and that's when I
+        realized AI had fried my brain. I had forgotten the basics of PyTorch, the same PyTorch I used
+        to write ML models with easily back in my undergrad days. Things started to get serious. It took
+        me longer than it should have, but I finally did it: I coded up the Transformer. I didn't train it
+        though, for various <strong>monetary reasons.</strong>
+      </p>
+
+      <h2>The actual GPT-2 part</h2>
+
+      <p>
+        Then I decided to train a GPT model, and the obvious one was GPT-2. I found our lord and
+        saviour's <a href="https://www.youtube.com/watch?v=l8pRSuU81PU&t=7683s">video</a>.
+      </p>
+
+      <img class="img-small" src="andrej-saint-image.jpeg" alt="Andrej Karpathy" id="andrej-img" style="cursor:zoom-in;" />
+
+      <dialog id="andrej-lightbox" style="background:transparent;border:none;padding:0;max-width:90vw;max-height:90vh;">
+        <img src="andrej-saint-image.jpeg" alt="Andrej Karpathy" style="max-width:90vw;max-height:90vh;border-radius:10px;display:block;" />
+      </dialog>
+
+      <p>
+        I coded along with the video. It's 4 hours long, but there is so much content packed into it and
+        Andrej speaks so fast that it took me around 3 days (2 dedicated hours a day).
+      </p>
+
+      <p>
+        At around the 1.3 hour mark the model was done, but there were so many optimizations after that.
+        I understood some of them, but most of it flew over my head. Andrej also brushes past concepts
+        like <strong>flash attention</strong>, <strong><code>torch.compile</code></strong> and <strong>DDP</strong>. (Not his fault. If he had included all
+        of that, the video would have been 10 hours long.) Anyhow, I coded the whole thing along with him,
+        and since I knew I had to learn more about those concepts, I didn't train the model on the original
+        dataset there and then.
+      </p>
+
+      <p>
+        I took a step back and recreated GPT-2 on my own, up to the 1.3 hour mark, and fed it the tiny
+        Shakespeare dataset just to verify that it worked. Felt like a bit of an achievement.
+      </p>
+
+      <img class="img-small" src="acheivement-meme.jpeg" alt="" style="max-width:220px;" />
+
+      <p>
+        As for the optimizations, the simple implementation of flash attention is:
+      </p>
+
+      <pre><code>y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
+
+      <p>
+        I didn't like it. I wanted to learn more about flash attention, so I went and researched what
+        was actually going on in the backend. And that's how my flash attention expedition began.
+      </p>
+
+      <div class="tbc">To be continued…</div>
+
+    </article>
+  </main>
+
+  <script>
+    const btn = document.getElementById('toggle');
+    const root = document.documentElement;
+    const saved = localStorage.getItem('theme');
+    if (saved) { root.dataset.theme = saved; btn.textContent = saved === 'mocha' ? 'latte' : 'mocha'; }
+    function makeFavicon() {
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const ctx = c.getContext('2d');
+      const isDark = document.documentElement.dataset.theme !== 'latte';
+      ctx.fillStyle = isDark ? '#181825' : '#e6e9ef';
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = isDark ? '#cba6f7' : '#8839ef';
+      ctx.font = 'bold 56px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('a', 32, 34);
+      let link = document.querySelector("link[rel='icon']");
+      if (!link) { link = document.createElement('link'); document.head.appendChild(link); }
+      link.rel = 'icon'; link.href = c.toDataURL();
+    }
+    makeFavicon();
+    btn.addEventListener('click', () => {
+      const next = root.dataset.theme === 'mocha' ? 'latte' : 'mocha';
+      root.dataset.theme = next;
+      btn.textContent = next === 'mocha' ? 'latte' : 'mocha';
+      localStorage.setItem('theme', next);
+      makeFavicon();
+    });
+    document.querySelectorAll('a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+    const lightbox = document.getElementById('andrej-lightbox');
+    document.getElementById('andrej-img').addEventListener('click', () => lightbox.showModal());
+    lightbox.addEventListener('click', () => lightbox.close());
+  </script>
+</body>
+</html>
