@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="mocha">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,17 +11,17 @@
   <meta property="og:type" content="article" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Lora:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    :root[data-theme="mocha"] {
-      --base: #1e1e2e; --mantle: #181825; --surface: #313244; --overlay: #6c7086;
-      --text: #cdd6f4; --subtext: #a6adc8; --green: #a6e3a1; --blue: #89b4fa;
-      --mauve: #cba6f7; --peach: #fab387; --red: #f38ba8;
+    :root[data-theme="dark"] {
+      --base: #272420; --mantle: #1e1c19; --surface: #38332d; --overlay: #6e6258;
+      --text: #e8ddd0; --subtext: #b0a090;
+      --blue: #c4a882; --mauve: #c4a882; --green: #c4a882; --peach: #b0a090; --red: #c47062;
     }
-    :root[data-theme="latte"] {
-      --base: #eff1f5; --mantle: #e6e9ef; --surface: #ccd0da; --overlay: #9ca0b0;
-      --text: #4c4f69; --subtext: #6c6f85; --green: #40a02b; --blue: #1e66f5;
-      --mauve: #8839ef; --peach: #fe640b; --red: #d20f39;
+    :root[data-theme="light"] {
+      --base: #f6f2ec; --mantle: #ece8e0; --surface: #d4cec4; --overlay: #8a7e70;
+      --text: #2a2218; --subtext: #5a4e42;
+      --blue: #7a5a3a; --mauve: #7a5a3a; --green: #7a5a3a; --peach: #5a4e42; --red: #8a3a2a;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -36,39 +36,45 @@
     a:hover { text-decoration: underline; }
 
     /* ── NAV ── */
+    header { border-bottom: 1px solid var(--surface); }
     nav {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 1.5rem 2rem;
-      border-bottom: 1px solid var(--surface);
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 1.25rem 2rem;
+      gap: 1.5rem;
     }
-    .nav-home {
+    .brand {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.9rem;
-      color: var(--mauve);
+      font-size: 1rem;
       font-weight: 500;
+      color: var(--text);
       text-decoration: none;
     }
-    .nav-home:hover { opacity: 0.8; text-decoration: none; }
-    .nav-right { display: flex; align-items: center; gap: 1.5rem; }
-    .nav-link { color: var(--subtext); font-size: 0.85rem; text-decoration: none; }
-    .nav-link:hover { color: var(--text); text-decoration: none; }
+    .brand:hover { color: var(--accent); text-decoration: none; }
+    .nav-links { display: flex; align-items: center; gap: 1.75rem; }
+    .nav-links a { font-size: 0.88rem; color: var(--subtext); text-decoration: none; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
     #toggle {
       background: none;
       border: 1px solid var(--surface);
       color: var(--subtext);
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      padding: 0.25rem 0.6rem;
+      font-size: 0.72rem;
+      padding: 0.2rem 0.55rem;
       cursor: pointer;
-      border-radius: 4px;
+      border-radius: 3px;
+      transition: border-color 0.15s, color 0.15s;
     }
     #toggle:hover { border-color: var(--overlay); color: var(--text); }
+    :root[data-theme="dark"] { --accent: #c4a882; }
+    :root[data-theme="light"] { --accent: #7a5a3a; }
 
     /* ── POST ── */
     main {
-      max-width: 680px;
+      max-width: 760px;
       margin: 0 auto;
       padding: 4rem 2rem 8rem;
     }
@@ -94,8 +100,9 @@
     }
 
     h1 {
+      font-family: 'Lora', Georgia, serif;
       font-size: 2rem;
-      font-weight: 600;
+      font-weight: 700;
       line-height: 1.25;
       margin-bottom: 2.5rem;
       color: var(--text);
@@ -209,14 +216,17 @@
   </style>
 </head>
 <body>
-  <nav>
-    <a href="/" class="nav-home">ayyp@earth</a>
-    <div class="nav-right">
-      <a href="/blogs" class="nav-link">blog</a>
-      <a href="/" class="nav-link">home</a>
-      <button id="toggle">latte</button>
-    </div>
-  </nav>
+  <header>
+    <nav>
+      <a href="/" class="brand">ayyp</a>
+      <div class="nav-links">
+        <a href="/blogs">writing</a>
+        <a href="https://github.com/ayyp1" target="_blank" rel="noopener">github</a>
+        <a href="https://www.linkedin.com/in/ashish-kumar-pokharel-03969a270/" target="_blank" rel="noopener">linkedin</a>
+        <button id="toggle">light</button>
+      </div>
+    </nav>
+  </header>
 
   <main>
     <div class="post-meta">
@@ -321,32 +331,30 @@
   <script>
     const btn = document.getElementById('toggle');
     const root = document.documentElement;
-    const saved = localStorage.getItem('theme');
-    if (saved) { root.dataset.theme = saved; btn.textContent = saved === 'mocha' ? 'latte' : 'mocha'; }
     function makeFavicon() {
       const c = document.createElement('canvas');
       c.width = c.height = 64;
       const ctx = c.getContext('2d');
-      const isDark = document.documentElement.dataset.theme !== 'latte';
-      ctx.fillStyle = isDark ? '#181825' : '#e6e9ef';
+      const isDark = root.dataset.theme === 'dark';
+      ctx.fillStyle = isDark ? '#1e1c19' : '#ece8e0';
       ctx.fillRect(0, 0, 64, 64);
-      ctx.fillStyle = isDark ? '#cba6f7' : '#8839ef';
+      ctx.fillStyle = isDark ? '#c4a882' : '#7a5a3a';
       ctx.font = 'bold 56px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('a', 32, 34);
       let link = document.querySelector("link[rel='icon']");
       if (!link) { link = document.createElement('link'); document.head.appendChild(link); }
       link.rel = 'icon'; link.href = c.toDataURL();
     }
-    makeFavicon();
-    btn.addEventListener('click', () => {
-      const next = root.dataset.theme === 'mocha' ? 'latte' : 'mocha';
-      root.dataset.theme = next;
-      btn.textContent = next === 'mocha' ? 'latte' : 'mocha';
-      localStorage.setItem('theme', next);
+    function setTheme(t) {
+      root.dataset.theme = t;
+      btn.textContent = t === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', t);
       makeFavicon();
-    });
+    }
+    const saved = localStorage.getItem('theme');
+    setTheme(saved === 'light' ? 'light' : 'dark');
+    btn.addEventListener('click', () => setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'));
     document.querySelectorAll('a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
     const lightbox = document.getElementById('andrej-lightbox');
     document.getElementById('andrej-img').addEventListener('click', () => lightbox.showModal());
