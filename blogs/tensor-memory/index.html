@@ -386,11 +386,53 @@
 
     <h2>Reshape has two cases</h2>
 
-    <p>Reshape has two paths, and which one you get depends on contiguity.</p>
-
     <p><strong>Case one: contiguous.</strong> What we just saw. Recompute the stride, return a view, no copy, done.</p>
 
-    <p><strong>Case two: non-contiguous.</strong> If a tensor's logical reading order and memory order don't agree, there is no stride that can bridge them. The jumps aren't regular. So reshape copies the data into a new location, in logical order:</p>
+    <p><strong>Case two: non-contiguous.</strong> Transpose the original tensor. The logical view becomes:</p>
+
+    <figure>
+      <svg viewBox="0 0 112 148" role="img" aria-label="A three by two grid holding 1 4, then 2 5, then 3 6" style="max-width:21rem">
+        <rect class="cell" x="8" y="8" width="48" height="44"/>
+        <rect class="cell" x="56" y="8" width="48" height="44"/>
+        <rect class="cell" x="8" y="52" width="48" height="44"/>
+        <rect class="cell" x="56" y="52" width="48" height="44"/>
+        <rect class="cell" x="8" y="96" width="48" height="44"/>
+        <rect class="cell" x="56" y="96" width="48" height="44"/>
+        <text class="num" x="32" y="30">1</text>
+        <text class="num" x="80" y="30">4</text>
+        <text class="num" x="32" y="74">2</text>
+        <text class="num" x="80" y="74">5</text>
+        <text class="num" x="32" y="118">3</text>
+        <text class="num" x="80" y="118">6</text>
+      </svg>
+      <figcaption>logical view after .T · shape [3, 2]</figcaption>
+    </figure>
+
+    <p>But physical memory is unchanged:</p>
+
+    <figure class="wide">
+      <svg viewBox="0 0 320 52" role="img" aria-label="Flat strip still holding 1 2 3 4 5 6 in original order">
+        <rect class="cell" x="16" y="6" width="48" height="40"/>
+        <rect class="cell" x="64" y="6" width="48" height="40"/>
+        <rect class="cell" x="112" y="6" width="48" height="40"/>
+        <rect class="cell" x="160" y="6" width="48" height="40"/>
+        <rect class="cell" x="208" y="6" width="48" height="40"/>
+        <rect class="cell" x="256" y="6" width="48" height="40"/>
+        <text class="num" x="40" y="26">1</text>
+        <text class="num" x="88" y="26">2</text>
+        <text class="num" x="136" y="26">3</text>
+        <text class="num" x="184" y="26">4</text>
+        <text class="num" x="232" y="26">5</text>
+        <text class="num" x="280" y="26">6</text>
+      </svg>
+      <figcaption>physical memory · still 1 2 3 4 5 6</figcaption>
+    </figure>
+
+    <p>The logical order is now <code>1 4 2 5 3 6</code> but memory holds <code>1 2 3 4 5 6</code>. They disagree, so the tensor is non-contiguous:</p>
+
+    <pre><code>x.T.is_contiguous()   <span class="cmt"># False</span></code></pre>
+
+    <p>Calling <code>.contiguous()</code> copies the data into a fresh block laid out in logical order:</p>
 
     <figure class="wide">
       <svg viewBox="0 0 320 156" role="img" aria-label="A flat strip holding 1 2 3 4 5 6 being copied into a new flat strip holding 1 4 2 5 3 6">
@@ -407,7 +449,7 @@
         <text class="num" x="232" y="28">5</text>
         <text class="num" x="280" y="28">6</text>
         <line class="flow" x1="160" y1="58" x2="160" y2="88" marker-end="url(#ah)" style="color:var(--svg-flow)"/>
-        <text class="lbl" x="196" y="77">copy</text>
+        <text class="lbl" x="210" y="77">.contiguous()</text>
         <rect class="cell" x="16" y="96" width="48" height="40"/>
         <rect class="cell" x="64" y="96" width="48" height="40"/>
         <rect class="cell" x="112" y="96" width="48" height="40"/>
@@ -422,10 +464,10 @@
         <text class="num" x="280" y="116">6</text>
         <text class="addr" x="160" y="150">new memory location</text>
       </svg>
-      <figcaption>the values are physically rearranged so logical order and memory order agree again</figcaption>
+      <figcaption>logical order is now written into memory · the tensor is contiguous again</figcaption>
     </figure>
 
-    <p>Only then is the stride computed on the fresh copy, and we get a contiguous result. The cost is a real copy of every element.</p>
+    <p>Now reshape can do its usual trick: recompute the stride on the fresh copy, no further cost.</p>
 
     <h2>Transpose only touches the stride</h2>
 
