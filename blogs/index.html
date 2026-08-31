@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>blog — ayyp</title>
+  <title>blog · ayyp</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Lora:wght@600;700&display=swap" rel="stylesheet">
   <style>
@@ -119,6 +119,17 @@
       white-space: nowrap;
     }
 
+    /* ── SECTION LABELS ── */
+    .section-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--overlay);
+      margin: 2.5rem 0 0.75rem;
+    }
+
     /* ── EMPTY STATE ── */
     .empty {
       padding: 3rem 0;
@@ -155,11 +166,26 @@
     <h1>Blog</h1>
     <p class="subtitle">writing on AI, systems, and things i find interesting.</p>
 
+    <h2 class="section-label">Technical</h2>
+    <div class="post-list">
+      <a class="post-item" href="/blogs/tensor-memory">
+        <div class="post-left">
+          <span class="post-title">The Stride Model: How Tensors Represent Reshape and Transpose</span>
+          <span class="post-desc">Once you can see the flat array underneath, reshape and transpose stop being two separate things to memorise.</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          <span class="post-tag">systems</span>
+          <span class="post-date">Aug 31, 2026</span>
+        </div>
+      </a>
+    </div>
+
+    <h2 class="section-label">Experience</h2>
     <div class="post-list">
       <a class="post-item" href="/blogs/training-gpt2">
         <div class="post-left">
           <span class="post-title">Training GPT-2: My Experience</span>
-          <span class="post-desc">From applying AI to understanding it — kernels, flash attention, and a lot of PyTorch relearning.</span>
+          <span class="post-desc">From applying AI to understanding it. Covers kernels, flash attention, and a lot of PyTorch relearning.</span>
         </div>
         <div style="display:flex;align-items:center;gap:0.5rem">
           <span class="post-tag">ml</span>
