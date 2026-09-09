@@ -227,7 +227,7 @@
       margin: 1.5rem 0;
       overflow-x: auto;
     }
-    .katex { font-size: 1.45em; }
+    .katex { font-size: 1.1em; }
 
     /* FIGURES */
     figure { margin: 2rem 0; text-align: center; }
@@ -285,6 +285,13 @@
       h1 { font-size: 1.65rem; }
       figure svg, figure.wide svg { max-width: 100%; }
     }
+    .toc { margin: 2rem 0 2.5rem; background: var(--surface); border-radius: 8px; padding: 1.25rem 1.5rem; border: 1px solid var(--overlay); }
+    .toc-title { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--subtext); margin-bottom: 0.5rem; }
+    .toc-links { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3rem; }
+    .toc-links a { font-size: 0.9rem; color: var(--subtext); text-decoration: none; }
+    .toc-links a:hover { color: var(--text); text-decoration: underline; }
+    .toc-links .toc-section { margin-top: 0.3rem; color: var(--text); font-weight: 500; }
+    .toc-links .toc-sub { padding-left: 1rem; font-size: 0.875rem; }
   </style>
   <script data-goatcounter="https://ayyp.goatcounter.com/count"
           async src="//gc.zgo.at/count.js"></script>
@@ -344,7 +351,36 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
       <p class="prereqs-note">If you are missing any of these, it will be hard. But if you are stubborn, help yourself.</p>
     </div>
 
-    <h2>Background</h2>
+    <div class="toc">
+      <div class="toc-title">Contents</div>
+      <div class="toc-links">
+        <a href="#background">Background</a>
+        <a href="#why">Why is Flash Attention needed?</a>
+        <a href="#enter">Enter Flash Attention</a>
+        <a href="#road-map">Road Map</a>
+        <a href="#phase-1" class="toc-section">Phase 1: Forward Pass</a>
+        <a href="#safe-softmax" class="toc-sub">Safe Softmax</a>
+        <a href="#online-softmax" class="toc-sub">Online Softmax</a>
+        <a href="#block-matmul" class="toc-sub">Block Matrix Multiplication</a>
+        <a href="#p1-algorithm" class="toc-sub">The Algorithm</a>
+        <a href="#correction-factor" class="toc-sub">The Correction Factor</a>
+        <a href="#phase-2" class="toc-section">Phase 2: Backward Pass</a>
+        <a href="#gradient-jacobian" class="toc-sub">Gradient and the Jacobian</a>
+        <a href="#chain-rule" class="toc-sub">Chain Rule Through a Matrix Multiply</a>
+        <a href="#softmax-jacobian" class="toc-sub">The Softmax Jacobian</a>
+        <a href="#d-shortcut" class="toc-sub">The D Shortcut</a>
+        <a href="#p2-algorithm" class="toc-sub">The Algorithm</a>
+        <a href="#outer-loop" class="toc-sub">Why the Outer Loop Flips</a>
+        <a href="#putting-together">Putting It Together</a>
+        <a href="#fa-versions">FA1, FA2, FA3</a>
+        <a href="#the-code">The Code</a>
+        <a href="#conclusion">Conclusion</a>
+        <a href="#references">References</a>
+        <a href="#appendix">Appendix: The Notes</a>
+      </div>
+    </div>
+
+    <h2 id="background">Background</h2>
 
     <p>Before we talk about Flash Attention, we need to talk about where computation actually happens and where it gets stuck. Because the problem Flash Attention solves is not about math. It is about memory.</p>
 
@@ -367,7 +403,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
       <figcaption>memory hierarchy &middot; fast and small at the top, slow and large at the bottom &middot; source: Dao et al., FlashAttention (2022)</figcaption>
     </figure>
 
-    <h2>Why is Flash Attention needed?</h2>
+    <h2 id="why">Why is Flash Attention needed?</h2>
 
     <p>SRAM is fast but tiny. HBM is large but slow. Ideally we want to compute attention entirely inside SRAM. The problem is that the intermediate matrices do not fit. Here is what a standard implementation actually does.</p>
 
@@ -391,7 +427,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>Count the HBM trips: write $S$, read $S$, write $P$, read $P$, write $O$. Five passes over an $N \times N$ matrix. For a sequence length of 1024 with float32, that is about 4 MB per pass, 20 MB of HBM traffic per head per forward pass. The GPU cores are not the bottleneck. They sit idle, waiting for data. This is what I/O bound means.</p>
 
-    <h2>Enter Flash Attention</h2>
+    <h2 id="enter">Enter Flash Attention</h2>
 
     <p>Flash Attention is the solution to exactly this problem. It does not change the math. It changes where and how the math is executed.</p>
 
@@ -469,9 +505,9 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>The differences between them will be covered below.</p>
 
-    <h2>Road Map</h2>
+    <h2 id="road-map">Road Map</h2>
 
-    <p>The rest of this post is split into two phases. Each phase starts with the math you need to understand it, then walks through the algorithm with a concrete example.</p>
+    <p>The rest of this post is split into two phases. Each phase starts with the math you need to understand it, then walks through the algorithm with a worked example.</p>
 
     <p><strong>Phase 1: Forward Pass.</strong> How Flash Attention computes the attention output in a single pass over the input, without ever writing the full $N \times N$ matrix to HBM.</p>
 
@@ -479,11 +515,11 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>If you get lost at any point, come back here and find where you are.</p>
 
-    <h2>Phase 1: Forward Pass</h2>
+    <h2 id="phase-1">Phase 1: Forward Pass</h2>
 
     <p>Three things to understand before the algorithm makes sense.</p>
 
-    <h3>Safe Softmax</h3>
+    <h3 id="safe-softmax">Safe Softmax</h3>
 
     <p>What softmax basically does is it computes the exp of every value in a row, sums all those exp values, and divides each individual value by that sum.</p>
 
@@ -513,17 +549,17 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
         <line x1="100" y1="78" x2="100" y2="118" stroke="var(--overlay)" stroke-width="0.8" stroke-dasharray="3,3"/>
         <path d="M 22,116 C 42,115 58,113 72,108 C 84,104 92,93 100,78 C 108,63 115,46 124,28 C 128,18 132,12 136,7" fill="none" stroke="var(--svg-cell)" stroke-width="1.6"/>
         <circle cx="100" cy="78" r="3" fill="var(--svg-cell)"/>
-        <text class="addr" x="94" y="75" text-anchor="end">1</text>
+        <text class="addr" x="94" y="65" text-anchor="end">1</text>
         <text class="addr" x="104" y="130">0</text>
         <text class="addr" x="52" y="93" text-anchor="middle">0 &lt; eˣ &lt; 1</text>
-        <text class="addr" x="52" y="104" text-anchor="middle">(safe zone)</text>
+        <text class="addr" x="38" y="104" text-anchor="middle">(safe zone)</text>
         <text class="addr" x="152" y="52" text-anchor="middle">eˣ &gt; 1</text>
         <text class="addr" x="152" y="63" text-anchor="middle">(explodes)</text>
       </svg>
       <figcaption>graph of eˣ &middot; subtracting the max keeps all exponents in the safe zone</figcaption>
     </figure>
 
-    <h3>Online Softmax</h3>
+    <h3 id="online-softmax">Online Softmax</h3>
 
     <p>Safe softmax solves the instability problem but it is not quite optimized. Standard safe softmax requires reading the input data multiple times:</p>
 
@@ -546,7 +582,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>The term $l_{i-1} \cdot e^{m_{i-1} - m_i}$ is what makes this work. When a new larger max arrives, this rescales the old sum to match the new max before adding the new term. This exact correction idea will appear again inside the Flash Attention algorithm.</p>
 
-    <h3>Block Matrix Multiplication</h3>
+    <h3 id="block-matmul">Block Matrix Multiplication</h3>
 
     <p>A normal matrix multiplication computes every element of the result in one shot. Block matrix multiplication does the same thing but splits the input matrices into smaller tiles and computes the result tile by tile. The final answer is identical. The difference is that each tile is small enough to fit in SRAM, which is exactly what Flash Attention needs.</p>
 
@@ -684,7 +720,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>This is exactly why online softmax is needed. By maintaining a running max $m$ that updates as each column block is processed, Flash Attention computes the correct global softmax without ever seeing the full row at once.</p>
 
-    <h3>The Algorithm</h3>
+    <h3 id="p1-algorithm">The Algorithm</h3>
 
     <p>This is the actual FlashAttention-2 forward pass algorithm from the paper. It looks dense but do not be overwhelmed. We will explain every line.</p>
 
@@ -693,7 +729,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
       <figcaption>Algorithm 1: FlashAttention-2 forward pass &middot; Dao, 2023</figcaption>
     </figure>
 
-    <p>Concrete example: $N = 8$ tokens, $d = 128$ embedding dim, block size $B_r = B_c = 2$, one head. $T_r = T_c = 4$.</p>
+    <p>Let's take an example: $N = 8$ tokens, $d = 128$ embedding dim, block size $B_r = B_c = 2$, one head. $T_r = T_c = 4$.</p>
 
     <p><strong>1.</strong> Divide $Q$, $K$, $V$ into row blocks. Each is shape $(8, 128)$, split token-wise into 4 blocks of 2 rows. $Q \to Q_1, Q_2, Q_3, Q_4$ each $(2 \times 128)$. Same for $K$ and $V$. The split is always along the token dimension. $K_j$ is a $(2 \times 128)$ row slice, transposed to $(128 \times 2)$ for the dot product.</p>
 
@@ -780,7 +816,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     $$O = \begin{bmatrix} O_1 \\ O_2 \\ O_3 \\ O_4 \end{bmatrix} \;\; (8 \times 128) \qquad L = \begin{bmatrix} L_1 \\ L_2 \\ L_3 \\ L_4 \end{bmatrix} \;\; (8,)$$
 
-    <h3>The Correction Factor</h3>
+    <h3 id="correction-factor">The Correction Factor</h3>
 
     <p>Look at the $l$ and $O$ updates in step 5. Both have $e^{m_{11} - m_{12}}$ in them. That is the correction factor.</p>
 
@@ -794,11 +830,11 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>That is the forward pass. We return $O = [O_1, O_2, O_3, O_4]$ of shape $(8 \times 128)$, the full attention output, and $L = [L_1, L_2, L_3, L_4]$ of shape $(8,)$, the log-sum-exp values. $L$ is not part of the attention result. It is saved specifically for the backward pass.</p>
 
-    <h2>Phase 2: Backward Pass</h2>
+    <h2 id="phase-2">Phase 2: Backward Pass</h2>
 
     <p>Four things to understand before the algorithm makes sense. This section also assumes you know how tensors are laid out in memory. If you do not, <a href="https://ashishkpokharel.com.np/blogs/tensor-memory/" target="_blank" rel="noopener">read this first</a>.</p>
 
-    <h3>Gradient and the Jacobian</h3>
+    <h3 id="gradient-jacobian">Gradient and the Jacobian</h3>
 
     <p>The word derivative means different things depending on the shape of the output.</p>
 
@@ -810,7 +846,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>Softmax takes a vector and outputs a vector. So its derivative is a Jacobian. That is why backward through softmax is the hard part.</p>
 
-    <h3>Chain Rule Through a Matrix Multiply</h3>
+    <h3 id="chain-rule">Chain Rule Through a Matrix Multiply</h3>
 
     <p>Take a linear layer $y = xW$ with $x \in \mathbb{R}^{1 \times N}$ and $W \in \mathbb{R}^{N \times M}$. If we already know $dY$, the gradient of the loss with respect to the output, the chain rule gives us the gradients with respect to the input and the weights:</p>
 
@@ -824,7 +860,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>We get $dV$ and $dP$ directly. The hard one is $dS$, because it has to go back through softmax.</p>
 
-    <h3>The Softmax Jacobian</h3>
+    <h3 id="softmax-jacobian">The Softmax Jacobian</h3>
 
     <p>Softmax for row $i$ is $P_{ij} = e^{S_{ij}} / Z_i$ where $Z_i = \sum_l e^{S_{il}}$. Every output $P_{ij}$ depends on every input $S_{ik}$ through $Z_i$. So we need $\partial P_{ij} / \partial S_{ik}$ for all $j$ and $k$. That is the full row Jacobian.</p>
 
@@ -884,7 +920,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>where $D_i = \text{rowsum}(dP_i \odot P_i)$.</p>
 
-    <h3>The D Shortcut</h3>
+    <h3 id="d-shortcut">The D Shortcut</h3>
 
     <p>To compute $dS$ we need $dP$. That is the $N \times N$ matrix $dO \cdot V^T$. Storing it costs $O(N^2)$ memory. Same problem as standard attention all over again.</p>
 
@@ -900,7 +936,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <div class="aside"><p>So we have three things: $dV = P^T dO$, $dP = dO\,V^T$, and $dS_{ij} = P_{ij}(dP_{ij} - D_i)$ where $D_i = \text{rowsum}(dO_i \odot O_i)$. The algorithm section will show how to compute all of these block by block without any $N \times N$ matrix in memory.</p></div>
 
-    <h3>The Algorithm</h3>
+    <h3 id="p2-algorithm">The Algorithm</h3>
 
     <p>This is the actual FlashAttention-2 backward pass algorithm from the paper. It looks dense but do not be overwhelmed. We will explain every line.</p>
 
@@ -908,6 +944,283 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
       <img src="fa2-backward.png" alt="FlashAttention-2 backward pass algorithm pseudocode">
       <figcaption>Algorithm 2: FlashAttention-2 backward pass &middot; Dao, 2023</figcaption>
     </figure>
+
+    <p>Let's take an example: $N = 8$ tokens, $d = 128$ embedding dim, block size $B_r = B_c = 2$, one head. $T_r = T_c = 4$.</p>
+
+    <figure class="wide">
+      <svg viewBox="0 0 500 135" style="max-width: 34rem;" role="img" aria-label="computation graph: Q and K feed into S, S feeds into P via softmax, P and V feed into O">
+        <!-- Q, K input labels -->
+        <text class="lbl" x="28" y="38">Q</text>
+        <text class="lbl" x="28" y="82">K</text>
+        <!-- Q → S, K → S -->
+        <line class="flow" x1="40" y1="38" x2="65" y2="44" marker-end="url(#ah)" style="color:var(--svg-flow)"/>
+        <line class="flow" x1="40" y1="82" x2="65" y2="70" marker-end="url(#ah)" style="color:var(--svg-flow)"/>
+        <!-- S box -->
+        <rect class="cell" x="65" y="22" width="80" height="70"/>
+        <line x1="65" y1="50" x2="145" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="lbl" x="105" y="36">S</text>
+        <text class="addr" x="105" y="67">QKᵀ</text>
+        <!-- S → P -->
+        <line class="flow" x1="147" y1="57" x2="183" y2="57" marker-end="url(#ah)" style="color:var(--svg-flow)"/>
+        <!-- P box -->
+        <rect class="cell" x="185" y="22" width="110" height="70"/>
+        <line x1="185" y1="50" x2="295" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="lbl" x="240" y="36">P</text>
+        <text class="addr" x="240" y="67">softmax(S)</text>
+        <!-- P → O -->
+        <line class="flow" x1="297" y1="57" x2="333" y2="57" marker-end="url(#ah)" style="color:var(--svg-flow)"/>
+        <!-- O box -->
+        <rect class="cell" x="335" y="22" width="80" height="70"/>
+        <line x1="335" y1="50" x2="415" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="lbl" x="375" y="36">O</text>
+        <text class="addr" x="375" y="67">PV</text>
+        <!-- V → O -->
+        <text class="lbl" x="375" y="122">V</text>
+        <line class="flow" x1="375" y1="114" x2="375" y2="93" marker-end="url(#ah)" style="color:var(--svg-flow)"/>
+      </svg>
+      <figcaption>forward computation graph &middot; backward retraces this in reverse</figcaption>
+    </figure>
+
+    <p>At this point the forward pass is done. Sitting in HBM we have $O$ and $L$. PyTorch computed $dO$, the gradient of the loss with respect to the output, and handed it to the kernel. $dO$ is shape $(N \times d) = (8, 128)$.</p>
+
+    <p><strong>1.</strong> Divide $Q$, $K$, $V$ into blocks the same way as the forward pass. $Q \to Q_1, Q_2, Q_3, Q_4$ each $(2 \times 128)$. Same for $K$ and $V$.</p>
+
+    <p><strong>2.</strong> Divide $O$, $dO$, $L$ the same way. $O \to O_1 \ldots O_4$ each $(2 \times 128)$. $dO \to dO_1 \ldots dO_4$ each $(2 \times 128)$. $L \to L_1 \ldots L_4$ each $(2,)$.</p>
+
+    <p><strong>3.</strong> Initialize $dQ = 0$ of shape $(8 \times 128)$ and split into $dQ_1 \ldots dQ_4$ each $(2 \times 128)$. $dK$ and $dV$ are initialized later, one block at a time inside the outer loop.</p>
+
+    <p><strong>4.</strong> Compute $D = \text{rowsum}(dO \odot O)$ of shape $(8,)$. This is the $D$ we derived earlier, one scalar per token. Write it to HBM and split into $D_1 \ldots D_4$ each $(2,)$. This is the only step that touches the full matrix before the loops start.</p>
+
+    <p><strong>5.</strong> Outer loop over $j = 1$ to $4$. This is the first big difference from the forward pass. The forward pass looped over $Q$ on the outside. The backward pass loops over $K$ and $V$ on the outside. The reason is that $dK_j$ and $dV_j$ accumulate over all $i$ and can be finalized before a single write to HBM. $dQ_i$ cannot, so it needs a read-modify-write on every inner step.</p>
+
+    <p><strong>6.</strong> Load $K_j$ and $V_j$ from HBM to SRAM.</p>
+
+    <p><strong>7.</strong> Initialize $dK_j = 0$ and $dV_j = 0$, both $(2 \times 128)$, in SRAM.</p>
+
+    <p><strong>8.</strong> Inner loop over $i = 1$ to $4$.</p>
+
+    <p><strong>9.</strong> Load $Q_i$, $O_i$, $dO_i$, $L_i$, $D_i$ from HBM to SRAM.</p>
+
+    <p><strong>10.</strong> Recompute the score tile.</p>
+
+    $$S_{ij} = Q_i K_j^T \quad (2 \times 128) \cdot (128 \times 2) \to (2 \times 2)$$
+
+    <p><strong>11.</strong> Recompute the attention weight tile using the saved log-sum-exp.</p>
+
+    $$P_{ij} = \exp(S_{ij} - L_i) \quad (2 \times 2)$$
+
+    <p>$S$ and $P$ were never stored during the forward pass. We get them back here from $Q_i$, $K_j$, and $L_i$. This is the recomputation trick that keeps memory $O(N)$ instead of $O(N^2)$.</p>
+
+    <p><strong>12.</strong> Update $dV_j$. From $O = PV$, the gradient is $dV = P^T \cdot dO$.</p>
+
+    $$dV_j = dV_j + P_{ij}^T \cdot dO_i \quad (2 \times 2)^T \cdot (2 \times 128) \to (2 \times 128)$$
+
+    <p>This stays in SRAM and accumulates across all $i$.</p>
+
+    <p><strong>13.</strong> Compute $dP_{ij}$. From $O = PV$, the gradient is $dP = dO \cdot V^T$.</p>
+
+    $$dP_{ij} = dO_i \cdot V_j^T \quad (2 \times 128) \cdot (128 \times 2) \to (2 \times 2)$$
+
+    <p><strong>14.</strong> Compute $dS_{ij}$ using the softmax Jacobian result from earlier.</p>
+
+    $$dS_{ij} = P_{ij} \odot (dP_{ij} - D_i) \quad (2 \times 2)$$
+
+    <p>$D_i$ is a $(2,)$ vector. It broadcasts across the columns of $dP_{ij}$, subtracting a different value from each row.</p>
+
+    <p><strong>15.</strong> Update $dQ_i$. From $S = QK^T$, the gradient is $dQ = dS \cdot K$.</p>
+
+    $$dQ_i = dQ_i + dS_{ij} \cdot K_j \quad (2 \times 2) \cdot (2 \times 128) \to (2 \times 128)$$
+
+    <p>$dQ_i$ accumulates across the outer $j$ loop, so it cannot stay in SRAM. Each inner step reads $dQ_i$ from HBM, adds the new contribution, and writes it back.</p>
+
+    <div class="aside"><p>After step 15: $dV_j$, $dK_j$ are still in SRAM. $dQ_i$ was read from HBM, updated, and written back. Nothing else touched HBM this inner step.</p></div>
+
+    <p><strong>16.</strong> Update $dK_j$. From $S = QK^T$, the gradient is $dK = dS^T \cdot Q$.</p>
+
+    $$dK_j = dK_j + dS_{ij}^T \cdot Q_i \quad (2 \times 2)^T \cdot (2 \times 128) \to (2 \times 128)$$
+
+    <p>This also stays in SRAM. Steps 12 and 16 are symmetric: $dV_j$ accumulates $P_{ij}^T dO_i$ and $dK_j$ accumulates $dS_{ij}^T Q_i$, both across the inner $i$ loop, both staying in SRAM until the inner loop is done.</p>
+
+    <p><strong>17.</strong> Inner loop ends. Repeat steps 9 to 16 for $i = 2, 3, 4$.</p>
+
+    <p><strong>18.</strong> Write $dK_j$ and $dV_j$ to HBM. One write each, after all $i$ have contributed. Advance $j \to 2$ and repeat from step 6.</p>
+
+    <h3 id="outer-loop">Why the Outer Loop Flips</h3>
+
+    <p>In the forward pass the outer loop is over $i$ (Q blocks). Each $O_i$ accumulates across the inner $j$ loop entirely in SRAM, then gets one write to HBM after the inner loop ends. That works because $O_i$ is independent across $i$.</p>
+
+    <p>In the backward pass the same logic applies to $dK_j$ and $dV_j$. They accumulate across the inner $i$ loop in SRAM and get one write to HBM after the inner loop ends at step 18. So the outer loop goes over $j$.</p>
+
+    <p>$dQ_i$ is the problem. It accumulates across $j$, meaning each new outer iteration adds a new contribution to the same $dQ_i$. It cannot stay in SRAM because a different $K_j$ and $V_j$ are loaded each outer step and SRAM is overwritten. So $dQ_i$ lives in HBM and gets a read-modify-write at every inner step (step 15). That is the one unavoidable cost.</p>
+
+    <p>Count the HBM writes. $dK$ and $dV$ each do $T_c = 4$ writes total, one per outer step. $dQ$ does $T_r \times T_c = 16$ round-trips. There is no arrangement that avoids this. $dQ$ accumulates over the outer loop by definition, so it always needs more trips than $dK$ and $dV$. The outer-$j$ structure is the choice that keeps the other two gradients cheap.</p>
+
+    <p><strong>19-20. Return.</strong> After $j = 4$:</p>
+
+    <figure class="wide">
+      <svg viewBox="0 0 290 160" style="max-width: 26rem;" role="img" aria-label="dQ dK dV each split into 4 row blocks of 2 tokens by 128 dimensions">
+        <text class="lbl" x="45" y="14">dQ</text>
+        <rect class="cell" x="10" y="20" width="70" height="120"/>
+        <line x1="10" y1="50" x2="80" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="10" y1="80" x2="80" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="10" y1="110" x2="80" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="45" y="35">dQ₁</text>
+        <text class="addr" x="45" y="65">dQ₂</text>
+        <text class="addr" x="45" y="95">dQ₃</text>
+        <text class="addr" x="45" y="125">dQ₄</text>
+        <text class="addr" x="45" y="153">2×128</text>
+
+        <text class="lbl" x="145" y="14">dK</text>
+        <rect class="cell" x="110" y="20" width="70" height="120"/>
+        <line x1="110" y1="50" x2="180" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="110" y1="80" x2="180" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="110" y1="110" x2="180" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="145" y="35">dK₁</text>
+        <text class="addr" x="145" y="65">dK₂</text>
+        <text class="addr" x="145" y="95">dK₃</text>
+        <text class="addr" x="145" y="125">dK₄</text>
+        <text class="addr" x="145" y="153">2×128</text>
+
+        <text class="lbl" x="245" y="14">dV</text>
+        <rect class="cell" x="210" y="20" width="70" height="120"/>
+        <line x1="210" y1="50" x2="280" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="210" y1="80" x2="280" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="210" y1="110" x2="280" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="245" y="35">dV₁</text>
+        <text class="addr" x="245" y="65">dV₂</text>
+        <text class="addr" x="245" y="95">dV₃</text>
+        <text class="addr" x="245" y="125">dV₄</text>
+        <text class="addr" x="245" y="153">2×128</text>
+      </svg>
+      <figcaption>dQ, dK, dV assembled from blocks &middot; same split as the forward pass inputs</figcaption>
+    </figure>
+
+    <p>PyTorch takes these and handles the rest of the backward pass through the projection layers.</p>
+
+    <p>That is the backward pass. We never stored $S$, $P$, or $dP$ at any point. $S$ and $P$ were recomputed tile by tile from $Q_i$, $K_j$, and the saved $L_i$. $D$ was computed in one pass before the loops. $dP$ was never stored at all. Its only role was inside the $dS$ formula, and that reduced down to $D_i$ which we already had. No $N \times N$ matrix ever exists.</p>
+
+    <h2 id="putting-together" class="conclusion">Putting It Together</h2>
+
+    <p>The forward pass is one kernel. It reads $Q$, $K$, $V$ from HBM, does everything in SRAM, and writes $O$ and $L$ back. Two HBM passes. Standard attention needed five for the same result, and an $N \times N$ matrix sitting in memory the whole time.</p>
+
+    <p>The backward pass is two kernels. The first sweeps through $dO$ and $O$ once to compute $D$ and writes it to HBM. The second does everything else and writes $dQ$, $dK$, $dV$. No $N \times N$ matrix at any point.</p>
+
+    <h2 id="fa-versions" class="conclusion">FA1, FA2, FA3</h2>
+
+    <p>Everything we walked through is FlashAttention-2. It is worth being clear about what changed across the three versions.</p>
+
+    <p>FA1 had the same core idea: fused kernel, tiling, online softmax, no $N \times N$ matrix. But it looped over key blocks on the outside and query blocks on the inside, the opposite of FA2. That meant the GPU threads doing the work had to share and merge partial results with each other on every step. FA2 flipped the loop order so each thread can own a complete output row and never has to talk to the others. The math is the same. FA2 is roughly 2x faster on the same hardware just from this change.</p>
+
+    <p>FA3 targets the H100 specifically. The H100 can load the next tile from memory while it is still computing the current one. FA3 is built around this: it keeps the chip busy the whole time instead of having it wait between loads. It also adds FP8 support, which doubles throughput at the cost of some precision. If you are on an A100 or anything older, FA3 does nothing for you. It is the same algorithm, just written for hardware most people do not have yet.</p>
+
+    <h2 id="the-code" class="conclusion">The Code</h2>
+
+    <p>Everything covered in this post is implemented in Triton. This was my first time writing Triton code, so I do not feel confident enough to walk through the implementation here. A tutorial might come later. For now, the code is on GitHub if you want to read it alongside this post.</p>
+
+    <p style="text-align:center;">
+      <a href="https://github.com/ayyp1/Flash-Attention" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:0.5rem;font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:var(--text);border:1px solid var(--surface);padding:0.4rem 0.85rem;border-radius:4px;text-decoration:none;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        ayyp1/Flash-Attention
+      </a>
+    </p>
+
+    <h2 id="conclusion" class="conclusion">Conclusion</h2>
+
+    <p>This took me weeks. Not days. Weeks of reading the same paper again, going back to the math, filling pages of notes, getting confused, sleeping on it, and starting over. There were parts where I thought I understood something and then sat down to write it and realized I did not. Writing forced the gaps to show.</p>
+
+    <p>I wrote this for myself first. I wanted something I could come back to six months from now and actually follow. If I had to explain it, that meant I had to understand it. That is the real reason this exists.</p>
+
+    <p>But I also wrote it because I remember how it felt looking for a resource that explained the math without skipping the hard parts. Most explanations either stay at the surface or assume you already know the internals. I wanted something in between. Something honest. This is my attempt at that.</p>
+
+    <p>If you are somewhere in the middle of this and it is not clicking yet, that is normal. It did not click for me for a long time either. The notes in the appendix are proof. Keep going.</p>
+
+    <p>And if you find something wrong, I want to know. I have tried to be careful but I am not an expert. This is one person trying to understand something hard and writing it down. If you have feedback on the content, the writing, or anything else, I would love to hear it. Reach me at <a href="mailto:ashishkumar.pokharel@gmail.com">ashishkumar.pokharel@gmail.com</a>.</p>
+
+    <h2 id="references" class="conclusion">References</h2>
+
+    <p>The biggest source for understanding the math in this post was Umar Jamil's lecture. He derives and codes Flash Attention from first principles in Triton, and his explanation of the inside mathematics is the clearest I have seen. If you want to see all of this explained out loud and then implemented, watch this first.</p>
+
+    <ul style="list-style:none;padding:0;margin:1.5rem 0;display:flex;flex-direction:column;gap:0.85rem;">
+      <li style="text-align:center;">
+        <a href="https://www.youtube.com/watch?v=zy8ChVd_oTM&t=11067s" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none;">
+          <img src="https://img.youtube.com/vi/zy8ChVd_oTM/hqdefault.jpg" alt="Umar Jamil – Flash Attention derived and coded from first principles with Triton" style="display:block;width:100%;max-width:22rem;border-radius:6px;margin:0 auto 0.5rem;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:var(--subtext);">Umar Jamil &mdash; Flash Attention derived and coded from first principles with Triton</span>
+        </a>
+      </li>
+      <li><a href="https://arxiv.org/abs/2205.14135" target="_blank" rel="noopener" style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;">Dao et al. (2022) &mdash; FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness</a></li>
+      <li><a href="https://arxiv.org/abs/2307.08691" target="_blank" rel="noopener" style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;">Dao (2023) &mdash; FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning</a></li>
+      <li><a href="https://arxiv.org/abs/2407.08608" target="_blank" rel="noopener" style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;">Shah et al. (2024) &mdash; FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision</a></li>
+      <li><a href="https://arxiv.org/abs/1805.02867" target="_blank" rel="noopener" style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;">Milakov &amp; Gimelshein (2018) &mdash; Online normalizer calculation for softmax</a></li>
+      <li><a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener" style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;">Vaswani et al. (2017) &mdash; Attention Is All You Need</a></li>
+    </ul>
+
+    <h2 id="appendix" class="conclusion">Appendix: The Notes</h2>
+
+    <p>These are the actual notes I wrote while trying to understand Flash Attention. Every page is a moment where something clicked or something confused me. I am putting them here because I think there is something honest about showing the mess behind a finished post. If you are someone sitting with paper trying to figure this out, this is what it looked like on my end too.</p>
+
+    <div id="lightbox" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
+      <button id="lb-prev" onclick="lbNav(-1)" style="position:absolute;left:1.25rem;background:none;border:none;color:#fff;font-size:2rem;cursor:pointer;opacity:0.7;padding:0.5rem;">&#8592;</button>
+      <img id="lightbox-img" src="" alt="" style="max-width:88vw;max-height:90vh;border-radius:6px;object-fit:contain;">
+      <button id="lb-next" onclick="lbNav(1)" style="position:absolute;right:1.25rem;background:none;border:none;color:#fff;font-size:2rem;cursor:pointer;opacity:0.7;padding:0.5rem;">&#8594;</button>
+      <span id="lb-count" style="position:absolute;bottom:1rem;color:#aaa;font-size:0.8rem;font-family:monospace;"></span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.5rem;margin-top:1.5rem;">
+      <img src="notes/IMG_8684.jpg" alt="Note 1"  class="note-thumb">
+      <img src="notes/IMG_8685.jpg" alt="Note 2"  class="note-thumb">
+      <img src="notes/IMG_8686.jpg" alt="Note 3"  class="note-thumb">
+      <img src="notes/IMG_8687.jpg" alt="Note 4"  class="note-thumb">
+      <img src="notes/IMG_8688.jpg" alt="Note 5"  class="note-thumb">
+      <img src="notes/IMG_8689.jpg" alt="Note 6"  class="note-thumb">
+      <img src="notes/IMG_8690.jpg" alt="Note 7"  class="note-thumb">
+      <img src="notes/IMG_8691.jpg" alt="Note 8"  class="note-thumb">
+      <img src="notes/IMG_8692.jpg" alt="Note 9"  class="note-thumb">
+      <img src="notes/IMG_8693.jpg" alt="Note 10" class="note-thumb">
+      <img src="notes/IMG_8694.jpg" alt="Note 11" class="note-thumb">
+      <img src="notes/IMG_8695.jpg" alt="Note 12" class="note-thumb">
+      <img src="notes/IMG_8696.jpg" alt="Note 13" class="note-thumb">
+      <img src="notes/IMG_8697.jpg" alt="Note 14" class="note-thumb">
+      <img src="notes/IMG_8698.jpg" alt="Note 15" class="note-thumb">
+      <img src="notes/IMG_8699.jpg" alt="Note 16" class="note-thumb">
+      <img src="notes/IMG_8700.jpg" alt="Note 17" class="note-thumb">
+      <img src="notes/IMG_8701.jpg" alt="Note 18" class="note-thumb">
+      <img src="notes/IMG_8702.jpg" alt="Note 19" class="note-thumb">
+      <img src="notes/IMG_8703.jpg" alt="Note 20" class="note-thumb">
+      <img src="notes/IMG_8704.jpg" alt="Note 21" class="note-thumb">
+    </div>
+
+    <style>
+      .note-thumb {
+        width: 100%;
+        aspect-ratio: 3/4;
+        object-fit: cover;
+        border-radius: 4px;
+        border: 1px solid var(--surface);
+        cursor: zoom-in;
+        transition: opacity 0.15s;
+      }
+      .note-thumb:hover { opacity: 0.8; }
+    </style>
+
+    <script>
+      const thumbs = [...document.querySelectorAll('.note-thumb')];
+      let lbIdx = 0;
+      function lbShow(i) {
+        lbIdx = (i + thumbs.length) % thumbs.length;
+        document.getElementById('lightbox-img').src = thumbs[lbIdx].src;
+        document.getElementById('lb-count').textContent = (lbIdx + 1) + ' / ' + thumbs.length;
+        document.getElementById('lightbox').style.display = 'flex';
+      }
+      function lbNav(dir) { event.stopPropagation(); lbShow(lbIdx + dir); }
+      thumbs.forEach((img, i) => img.addEventListener('click', () => lbShow(i)));
+      document.addEventListener('keydown', e => {
+        const lb = document.getElementById('lightbox');
+        if (lb.style.display === 'none') return;
+        if (e.key === 'ArrowRight') lbShow(lbIdx + 1);
+        if (e.key === 'ArrowLeft')  lbShow(lbIdx - 1);
+        if (e.key === 'Escape')     lb.style.display = 'none';
+      });
+    </script>
 
   </div>
 </main>
@@ -948,6 +1261,25 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
   const saved = localStorage.getItem('theme');
   setTheme(saved === 'light' ? 'light' : 'dark');
   btn.addEventListener('click', () => setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'));
+</script>
+
+<button id="top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">↑</button>
+<style>
+  #top-btn {
+    position: fixed; bottom: 2rem; right: 3.5rem;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--overlay); border-radius: 50%;
+    width: 2.5rem; height: 2.5rem; font-size: 1.1rem;
+    cursor: pointer; opacity: 0; transition: opacity 0.2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #top-btn.visible { opacity: 1; }
+</style>
+<script>
+  const topBtn = document.getElementById('top-btn');
+  window.addEventListener('scroll', () => {
+    topBtn.classList.toggle('visible', window.scrollY > 400);
+  });
 </script>
 </body>
 </html>
