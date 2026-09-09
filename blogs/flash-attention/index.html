@@ -227,21 +227,23 @@
       margin: 1.5rem 0;
       overflow-x: auto;
     }
-    .prose .katex { font-size: 1.05em; }
+    .prose .katex { font-size: 1.25em; }
 
     /* FIGURES */
-    figure { margin: 2rem 0; }
+    figure { margin: 2rem 0; text-align: center; }
     figure svg {
       display: block;
       width: 100%;
       height: auto;
       max-width: 26rem;
+      margin: 0 auto;
     }
     figure img {
       display: block;
       width: 100%;
       height: auto;
       border-radius: 4px;
+      margin: 0 auto;
     }
     figure.wide svg { max-width: 100%; margin: 0 auto; display: block; }
     figure.wide figcaption { text-align: center; }
@@ -263,6 +265,13 @@
     svg .arc { fill: none; stroke: var(--svg-flow); stroke-width: 1.4; }
     svg .brace { fill: none; stroke: var(--overlay); stroke-width: 1.2; }
     svg .flow { stroke: var(--svg-flow); stroke-width: 1.6; fill: none; }
+
+    .prose h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 2rem 0 0.75rem;
+      color: var(--text);
+    }
 
     .prose h2.conclusion {
       font-family: 'Inter', sans-serif;
@@ -468,6 +477,114 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
     <p><strong>Phase 2: Backward Pass.</strong> How gradients flow back through the fused kernel, and why that requires a different trick than the forward pass.</p>
 
     <p>If you get lost at any point, come back here and find where you are.</p>
+
+    <h2>Phase 1: Forward Pass</h2>
+
+    <p>Three things to understand before the algorithm makes sense.</p>
+
+    <h3>Safe Softmax</h3>
+
+    <p>What softmax basically does is it computes the exp of every value in a row, sums all those exp values, and divides each individual value by that sum.</p>
+
+    $$\text{softmax}(x_i) = \frac{e^{x_i}}{\underbrace{\sum_{j=1}^{N} e^{x_j}}_{\text{norm factor}}}$$
+
+    <p>The denominator $\sum_{j=1}^{N} e^{x_j}$ is the norm factor. It sums all the exponentials across the row, which forces every output to be between 0 and 1 and makes all outputs sum to 1. Without it you just have raw exponentials that carry no meaning as a distribution.</p>
+
+    <p>It looks innocent but has a problem. If the value $x_i$ in the array is large, then $e^{x_i}$ will be even larger. The exponents will explode, which leads to numerical instability: the values cannot be represented by float32 or float16.</p>
+
+    <p>So a safe way to do it is to divide both the numerator and denominator by a constant $c$:</p>
+
+    $$\frac{c \cdot e^{x_i}}{c \cdot \sum_{j=1}^{N} e^{x_j}} = \frac{e^{x_i + \log c}}{\sum_{j=1}^{N} e^{x_j + \log c}}$$
+
+    <p>Let $-\log c = k$, so $\log c = -k$. Then:</p>
+
+    $$\text{softmax}(x_i) = \frac{e^{x_i - k}}{\sum_{j=1}^{N} e^{x_j - k}}$$
+
+    <p>Now we choose $k = \max(x)$, the maximum of that row. What happens is most of the values $(x_i - k)$ will be negative, and for $x_i = \max(x)$ it will be exactly 0. Looking at the graph of $e^x$: when the value is negative the result is between 0 and 1, when the value is 0 the result is exactly 1. So the exponents do not explode anymore. Numerically stable.</p>
+
+    <figure class="narrow">
+      <svg viewBox="0 0 240 150" role="img" aria-label="Graph of e to the x. For x less than 0 the value is between 0 and 1. At x equals 0 the value is exactly 1. For x greater than 0 the value grows beyond 1.">
+        <line x1="20" y1="118" x2="218" y2="118" stroke="var(--overlay)" stroke-width="1.2" marker-end="url(#ah)" style="color:var(--overlay)"/>
+        <line x1="100" y1="138" x2="100" y2="16" stroke="var(--overlay)" stroke-width="1.2" marker-end="url(#ah)" style="color:var(--overlay)"/>
+        <text class="addr" x="222" y="121">x</text>
+        <text class="addr" x="105" y="13">y</text>
+        <line x1="22" y1="78" x2="158" y2="78" stroke="var(--overlay)" stroke-width="0.8" stroke-dasharray="3,3"/>
+        <line x1="100" y1="78" x2="100" y2="118" stroke="var(--overlay)" stroke-width="0.8" stroke-dasharray="3,3"/>
+        <path d="M 22,116 C 42,115 58,113 72,108 C 84,104 92,93 100,78 C 108,63 115,46 124,28 C 128,18 132,12 136,7" fill="none" stroke="var(--svg-cell)" stroke-width="1.6"/>
+        <circle cx="100" cy="78" r="3" fill="var(--svg-cell)"/>
+        <text class="addr" x="94" y="75" text-anchor="end">1</text>
+        <text class="addr" x="104" y="130">0</text>
+        <text class="addr" x="52" y="93" text-anchor="middle">0 &lt; eˣ &lt; 1</text>
+        <text class="addr" x="52" y="104" text-anchor="middle">(safe zone)</text>
+        <text class="addr" x="152" y="52" text-anchor="middle">eˣ &gt; 1</text>
+        <text class="addr" x="152" y="63" text-anchor="middle">(explodes)</text>
+      </svg>
+      <figcaption>graph of eˣ &middot; subtracting the max keeps all exponents in the safe zone</figcaption>
+    </figure>
+
+    <h3>Online Softmax</h3>
+
+    <p>Safe softmax solves the instability but still requires reading the input data multiple times:</p>
+
+    <p>First to find the max in each row. Then to compute the exp sum. Then to normalize the values.</p>
+
+    <p>Standard safe softmax needs all three of these passes separately. Online softmax solves this by keeping a running maximum $m$ and a running sum $l$ that change as new data is introduced. We never need to re-read the full input.</p>
+
+    <p>$m_0 = -\infty,\ l_0 = 0$. For $i = 1$ to $N$:</p>
+
+    $$m_i = \max(m_{i-1},\ x_i)$$
+    $$l_i = l_{i-1} \cdot e^{m_{i-1} - m_i} + e^{x_i - m_i}$$
+
+    <p>At the end, for each $k$:</p>
+
+    $$\text{softmax}(x_k) = \frac{e^{x_k - m_N}}{l_N}$$
+
+    <p>The term $l_{i-1} \cdot e^{m_{i-1} - m_i}$ is the key. When a new larger max arrives, this rescales the old running sum before adding the new term. This correction idea is the same one that appears in the Flash Attention algorithm.</p>
+
+    <h3>Block Matrix Multiplication</h3>
+
+    <p>Take $Q = (8, 128)$, $K = (8, 128)$, so $K^T = (128, 8)$. Let us divide $Q$ into blocks of 2 rows, giving 4 blocks: $Q_1, Q_2, Q_3, Q_4$, each of shape $(2, 128)$. We divide $K^T$ into blocks of 2 in its column dimension as well, giving $K_1^T, K_2^T, K_3^T, K_4^T$, each of shape $(128, 2)$.</p>
+
+    <p>Now if we compute $S = QK^T$ block by block:</p>
+
+    $$S_{ij} = Q_i K_j^T$$
+
+    <p>So $S_{11} = Q_1 K_1^T$ has shape $(2, 2)$, $S_{12} = Q_1 K_2^T$ also $(2, 2)$, and so on. The full $S$ is assembled from these tiles. Flash Attention uses this to process only a tile at a time, keeping it in SRAM, and never writing the full $N \times N$ matrix to HBM.</p>
+
+    <h3>The Algorithm</h3>
+
+    <p>Example: 8 tokens, embedding dim 128, block size $B_r = B_c = 2$, one attention head. This gives $T_r = 4$ row blocks and $T_c = 4$ column blocks.</p>
+
+    <p>Divide the matrices into blocks. $Q \to Q_1, Q_2, Q_3, Q_4$ each of shape $2 \times 128$. Same for $K$ and $V$. Output $O$ is split the same way as $Q$.</p>
+
+    <p>Initialize in SRAM for each row block:</p>
+
+    $$O_0 = \mathbf{0}_{2 \times 128}, \quad l_0 = \mathbf{0}_2, \quad m_0 = -\infty$$
+
+    <p><strong>Outer loop</strong> over $i = 1$ to $4$, one $Q_i$ block at a time. <strong>Inner loop</strong> over $j = 1$ to $4$, one $K_j$ block at a time. For each $(i, j)$:</p>
+
+    $$S_{ij} = Q_i K_j^T$$
+    $$m_{ij} = \max\!\left(\text{rowmax}(S_{ij}),\ m_{i,j-1}\right)$$
+    $$P_{ij} = \exp(S_{ij} - m_{ij})$$
+    $$l_{ij} = l_{i,j-1} \cdot e^{m_{i,j-1} - m_{ij}} + \text{rowsum}(P_{ij})$$
+    $$O_{ij} = \text{diag}\!\left(e^{m_{i,j-1} - m_{ij}}\right) O_{i,j-1} + P_{ij} V_j$$
+
+    <p>After the inner loop finishes, normalize and compute the log-sum-exp:</p>
+
+    $$O_i = \text{diag}(l_{i,T_c})^{-1} \cdot O_{i,T_c}$$
+    $$L_i = m_{i,T_c} + \log(l_{i,T_c})$$
+
+    <p>Store $O_i$ and $L_i$ to HBM. Move to the next outer loop. After all $i$, return $O = [O_1, O_2, O_3, O_4]$ and $L = [L_1, L_2, L_3, L_4]$.</p>
+
+    <h3>The Correction Factor</h3>
+
+    <p>During the inner loop a new tile can reveal a larger maximum than before. The output accumulated so far used the wrong max. The correction factor fixes this.</p>
+
+    <p>When $m_\text{new} > m_\text{old}$, scale down the old output before adding the new one:</p>
+
+    $$O_\text{new} = \text{diag}\!\left(\exp(m_\text{old} - m_\text{new})\right) \cdot O_\text{old} + P_\text{new} V_\text{new}$$
+
+    <p>Since $m_\text{old} < m_\text{new}$ the exponent is negative, so the old output shrinks. The same thing happens to $l$. This is exactly the online softmax correction from the math prereqs, now applied block by block.</p>
 
   </div>
 </main>
