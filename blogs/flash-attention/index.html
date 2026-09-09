@@ -227,7 +227,7 @@
       margin: 1.5rem 0;
       overflow-x: auto;
     }
-    .prose .katex { font-size: 1.25em; }
+    .katex { font-size: 1.45em; }
 
     /* FIGURES */
     figure { margin: 2rem 0; text-align: center; }
@@ -524,13 +524,15 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <h3>Online Softmax</h3>
 
-    <p>Safe softmax solves the instability but still requires reading the input data multiple times:</p>
+    <p>Safe softmax solves the instability problem but it is not quite optimized. Standard safe softmax requires reading the input data multiple times:</p>
 
-    <p>First to find the max in each row. Then to compute the exp sum. Then to normalize the values.</p>
+    <p>(a) To find the max in each row.</p>
+    <p>(b) To compute the exp sum.</p>
+    <p>(c) To normalize the values.</p>
 
-    <p>Standard safe softmax needs all three of these passes separately. Online softmax solves this by keeping a running maximum $m$ and a running sum $l$ that change as new data is introduced. We never need to re-read the full input.</p>
+    <p>That is three separate passes over the data. Online softmax solves this by keeping a running maximum $m$ and a running sum $l$ which change as new data is introduced. We never need to re-read the full row.</p>
 
-    <p>$m_0 = -\infty,\ l_0 = 0$. For $i = 1$ to $N$:</p>
+    <p>Initialize $m_0 = -\infty$, $l_0 = 0$. For $i = 1$ to $N$:</p>
 
     $$m_i = \max(m_{i-1},\ x_i)$$
     $$l_i = l_{i-1} \cdot e^{m_{i-1} - m_i} + e^{x_i - m_i}$$
@@ -539,17 +541,147 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     $$\text{softmax}(x_k) = \frac{e^{x_k - m_N}}{l_N}$$
 
-    <p>The term $l_{i-1} \cdot e^{m_{i-1} - m_i}$ is the key. When a new larger max arrives, this rescales the old running sum before adding the new term. This correction idea is the same one that appears in the Flash Attention algorithm.</p>
+    <p>How does this solve the three pass problem? The running $m$ tracks the maximum seen so far, so we find it on the fly without a dedicated pass. The running $l$ accumulates the exp sum as values arrive. And the final division by $l_N$ is the normalization. All three happen in one sweep.</p>
+
+    <p>The term $l_{i-1} \cdot e^{m_{i-1} - m_i}$ is what makes this work. When a new larger max arrives, this rescales the old sum to match the new max before adding the new term. This exact correction idea will appear again inside the Flash Attention algorithm.</p>
 
     <h3>Block Matrix Multiplication</h3>
 
-    <p>Take $Q = (8, 128)$, $K = (8, 128)$, so $K^T = (128, 8)$. Let us divide $Q$ into blocks of 2 rows, giving 4 blocks: $Q_1, Q_2, Q_3, Q_4$, each of shape $(2, 128)$. We divide $K^T$ into blocks of 2 in its column dimension as well, giving $K_1^T, K_2^T, K_3^T, K_4^T$, each of shape $(128, 2)$.</p>
+    <p>A normal matrix multiplication computes every element of the result in one shot. Block matrix multiplication does the same thing but splits the input matrices into smaller tiles and computes the result tile by tile. The final answer is identical. The difference is that each tile is small enough to fit in SRAM, which is exactly what Flash Attention needs.</p>
 
-    <p>Now if we compute $S = QK^T$ block by block:</p>
+    <p>We have $Q$ and $K$ both of shape $(8, 128)$, so $K^T$ is $(128, 8)$.</p>
 
-    $$S_{ij} = Q_i K_j^T$$
+    <figure class="wide">
+      <svg viewBox="0 0 340 120" style="max-width: 38rem;" role="img" aria-label="Q as a single 8 by 128 block and K transposed as a single 128 by 8 block">
 
-    <p>So $S_{11} = Q_1 K_1^T$ has shape $(2, 2)$, $S_{12} = Q_1 K_2^T$ also $(2, 2)$, and so on. The full $S$ is assembled from these tiles. Flash Attention uses this to process only a tile at a time, keeping it in SRAM, and never writing the full $N \times N$ matrix to HBM.</p>
+        <!-- Q full block -->
+        <text class="lbl" x="75" y="13">Q</text>
+        <rect class="cell" x="10" y="20" width="130" height="80"/>
+        <text class="addr" x="75" y="60">8 × 128</text>
+        <text class="addr" x="75" y="108">rows → tokens</text>
+
+        <!-- × -->
+        <text class="lbl" x="175" y="63">×</text>
+
+        <!-- K^T full block -->
+        <text class="lbl" x="265" y="13">Kᵀ</text>
+        <rect class="cell" x="195" y="20" width="130" height="80"/>
+        <text class="addr" x="265" y="60">128 × 8</text>
+        <text class="addr" x="265" y="108">cols → tokens</text>
+
+      </svg>
+      <figcaption>Q and Kᵀ before splitting</figcaption>
+    </figure>
+
+    <p>$Q$ is divided into 4 row blocks of 2 rows each. Each block $Q_i$ is shape $(2, 128)$.</p>
+
+    <p>$K^T$ is divided into 4 column blocks of 2 columns each. Each block $K_j^T$ is shape $(128, 2)$.</p>
+
+    <figure class="wide">
+      <svg viewBox="0 0 408 155" style="max-width: 34rem;" role="img" aria-label="Q divided into 4 row blocks times K transposed divided into 4 column blocks equals S as a 4 by 4 grid of blocks">
+
+        <!-- Q: tall box with 4 horizontal bands -->
+        <text class="lbl" x="47" y="13">Q</text>
+        <text class="addr" x="47" y="152">8×128</text>
+        <rect class="cell" x="10" y="20" width="74" height="120"/>
+        <line x1="10" y1="50" x2="84" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="10" y1="80" x2="84" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="10" y1="110" x2="84" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="47" y="35">Q₁</text>
+        <text class="addr" x="47" y="65">Q₂</text>
+        <text class="addr" x="47" y="95">Q₃</text>
+        <text class="addr" x="47" y="125">Q₄</text>
+
+        <!-- × -->
+        <text class="lbl" x="97" y="83">×</text>
+
+        <!-- K^T: wide box with 4 vertical bands -->
+        <text class="lbl" x="178" y="13">Kᵀ</text>
+        <text class="addr" x="178" y="110">128×8</text>
+        <rect class="cell" x="110" y="55" width="136" height="30"/>
+        <line x1="144" y1="55" x2="144" y2="85" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="178" y1="55" x2="178" y2="85" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="212" y1="55" x2="212" y2="85" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="127" y="48">K₁ᵀ</text>
+        <text class="addr" x="161" y="48">K₂ᵀ</text>
+        <text class="addr" x="195" y="48">K₃ᵀ</text>
+        <text class="addr" x="229" y="48">K₄ᵀ</text>
+
+        <!-- = -->
+        <text class="lbl" x="258" y="83">=</text>
+
+        <!-- S: 4×4 grid of blocks -->
+        <text class="lbl" x="318" y="13">S</text>
+        <text class="addr" x="318" y="152">8×8</text>
+        <rect class="cell" x="278" y="20" width="120" height="120"/>
+        <line x1="278" y1="50" x2="398" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="278" y1="80" x2="398" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="278" y1="110" x2="398" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="308" y1="20" x2="308" y2="140" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="338" y1="20" x2="338" y2="140" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="368" y1="20" x2="368" y2="140" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <!-- row 1 labels -->
+        <text class="addr" x="293" y="35">S₁₁</text>
+        <text class="addr" x="323" y="35">S₁₂</text>
+        <text class="addr" x="353" y="35">S₁₃</text>
+        <text class="addr" x="383" y="35">S₁₄</text>
+        <!-- col 1 -->
+        <text class="addr" x="293" y="65">S₂₁</text>
+        <text class="addr" x="293" y="95">S₃₁</text>
+        <text class="addr" x="293" y="125">S₄₁</text>
+        <!-- corner + dots -->
+        <text class="addr" x="383" y="125">S₄₄</text>
+        <text class="addr" x="353" y="95">· ·</text>
+
+      </svg>
+      <figcaption>Q split into row blocks · Kᵀ split into column blocks · S is their block product</figcaption>
+    </figure>
+
+    <p>Each tile $S_{ij} = Q_i K_j^T$ comes out shape $(2, 2)$ and is computed independently.</p>
+
+    <p>Now here is the problem with applying softmax to these blocks.</p>
+
+    <p>Softmax of $S_{11}$ alone would use only the max of $S_{11}$. But the correct softmax for row 1 needs the max across all four blocks in that row: $S_{11}$, $S_{12}$, $S_{13}$, $S_{14}$. Using a local max gives the wrong normalization.</p>
+
+    <figure class="wide">
+      <svg viewBox="0 0 280 195" style="max-width: 26rem;" role="img" aria-label="S matrix showing that softmax of row 1 requires all four blocks S11 S12 S13 S14, not just S11">
+
+        <!-- subtle highlight on row 1 -->
+        <rect x="20" y="20" width="240" height="38" style="fill: color-mix(in srgb, var(--text) 7%, transparent)"/>
+
+        <rect class="cell" x="20" y="20" width="240" height="152"/>
+        <line x1="20" y1="58" x2="260" y2="58" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="20" y1="96" x2="260" y2="96" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="20" y1="134" x2="260" y2="134" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="80" y1="20" x2="80" y2="172" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="140" y1="20" x2="140" y2="172" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="200" y1="20" x2="200" y2="172" stroke="var(--svg-cell)" stroke-width="0.6"/>
+
+        <!-- row 1 (highlighted) -->
+        <text class="lbl" x="50" y="39">S₁₁</text>
+        <text class="lbl" x="110" y="39">S₁₂</text>
+        <text class="lbl" x="170" y="39">S₁₃</text>
+        <text class="lbl" x="230" y="39">S₁₄</text>
+
+        <!-- other rows -->
+        <text class="addr" x="50" y="77">S₂₁</text>
+        <text class="addr" x="110" y="77">S₂₂</text>
+        <text class="addr" x="170" y="77">S₂₃</text>
+        <text class="addr" x="230" y="77">S₂₄</text>
+        <text class="addr" x="50" y="115">S₃₁</text>
+        <text class="addr" x="140" y="115">· · ·</text>
+        <text class="addr" x="50" y="153">S₄₁</text>
+        <text class="addr" x="230" y="153">S₄₄</text>
+
+        <!-- brace under row 1 -->
+        <path class="brace" d="M 20,175 L 20,180 L 260,180 L 260,175"/>
+        <text x="140" y="193" text-anchor="middle" fill="var(--overlay)" font-family="'JetBrains Mono', monospace" font-size="9">softmax needs the global max across all 4 blocks</text>
+
+      </svg>
+      <figcaption>applying softmax to S₁₁ alone uses a local max · the true max of the row could be anywhere</figcaption>
+    </figure>
+
+    <p>This is exactly why online softmax is needed. By maintaining a running max $m$ that updates as each column block is processed, Flash Attention computes the correct global softmax without ever seeing the full row at once.</p>
 
     <h3>The Algorithm</h3>
 
