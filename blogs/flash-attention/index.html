@@ -792,7 +792,122 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>Row 0 and row 1 can have different maxima, so they get corrected by different amounts. This is online softmax, now applied block by block.</p>
 
-    <p>That is the forward pass. We return $O = [O_1, O_2, O_3, O_4]$ of shape $(8 \times 128)$, the full attention output, and $L = [L_1, L_2, L_3, L_4]$ of shape $(8,)$, the log-sum-exp values. $L$ is not part of the attention result. It is saved specifically for the backward pass. In Phase 2 we will look at how gradients flow back through the fused kernel.</p>
+    <p>That is the forward pass. We return $O = [O_1, O_2, O_3, O_4]$ of shape $(8 \times 128)$, the full attention output, and $L = [L_1, L_2, L_3, L_4]$ of shape $(8,)$, the log-sum-exp values. $L$ is not part of the attention result. It is saved specifically for the backward pass.</p>
+
+    <h2>Phase 2: Backward Pass</h2>
+
+    <p>Four things to understand before the algorithm makes sense. This section also assumes you know how tensors are laid out in memory. If you do not, <a href="https://ashishkpokharel.com.np/blogs/tensor-memory/" target="_blank" rel="noopener">read this first</a>.</p>
+
+    <h3>Gradient and the Jacobian</h3>
+
+    <p>The word derivative means different things depending on the shape of the output.</p>
+
+    <p>When $f: \mathbb{R}^N \to \mathbb{R}$ has a scalar output, the derivative is a <strong>gradient</strong>. It is a vector of partial derivatives, one per input. The update step is a dot product.</p>
+
+    <p>When $f: \mathbb{R}^N \to \mathbb{R}^M$ has a vector output, the derivative is a <strong>Jacobian</strong>. It is an $M \times N$ matrix $J$ where $J_{jk} = \partial y_j / \partial x_k$. The update step is a matrix multiply: $\Delta y = J \cdot \Delta x$.</p>
+
+    $$J = \begin{bmatrix} \partial y_1/\partial x_1 & \cdots & \partial y_1/\partial x_N \\ \vdots & \ddots & \vdots \\ \partial y_M/\partial x_1 & \cdots & \partial y_M/\partial x_N \end{bmatrix}$$
+
+    <p>Softmax takes a vector and outputs a vector. So its derivative is a Jacobian. That is why backward through softmax is the hard part.</p>
+
+    <h3>Chain Rule Through a Matrix Multiply</h3>
+
+    <p>Take a linear layer $y = xW$ with $x \in \mathbb{R}^{1 \times N}$ and $W \in \mathbb{R}^{N \times M}$. If we already know $dY$, the gradient of the loss with respect to the output, the chain rule gives us the gradients with respect to the input and the weights:</p>
+
+    $$\frac{\partial \ell}{\partial x} = dY \cdot W^T \qquad (1 \times N)$$
+    $$\frac{\partial \ell}{\partial W} = x^T \cdot dY \qquad (N \times M)$$
+
+    <p>The attention forward pass computes $O = PV$. Same pattern. Given $dO$:</p>
+
+    $$dV = P^T \cdot dO \qquad (N \times d)$$
+    $$dP = dO \cdot V^T \qquad (N \times N)$$
+
+    <p>We get $dV$ and $dP$ directly. The hard one is $dS$, because it has to go back through softmax.</p>
+
+    <h3>The Softmax Jacobian</h3>
+
+    <p>Softmax for row $i$ is $P_{ij} = e^{S_{ij}} / Z_i$ where $Z_i = \sum_l e^{S_{il}}$. Every output $P_{ij}$ depends on every input $S_{ik}$ through $Z_i$. So we need $\partial P_{ij} / \partial S_{ik}$ for all $j$ and $k$. That is the full row Jacobian.</p>
+
+    <p><strong>When $j = k$,</strong> $P_{ij}$ shows up in both the numerator and $Z_i$:</p>
+
+    $$\frac{\partial P_{ij}}{\partial S_{ij}} = \frac{e^{S_{ij}}}{Z_i} - \frac{e^{S_{ij}} \cdot e^{S_{ij}}}{Z_i^2} = P_{ij} - P_{ij}^2 = P_{ij}(1 - P_{ij})$$
+
+    <p><strong>When $j \neq k$,</strong> $P_{ij}$ only sees $S_{ik}$ through $Z_i$:</p>
+
+    $$\frac{\partial P_{ij}}{\partial S_{ik}} = -\frac{e^{S_{ij}} \cdot e^{S_{ik}}}{Z_i^2} = -P_{ij}\,P_{ik}$$
+
+    <p>Put it together and the full Jacobian for row $i$ is $J_i = \text{diag}(P_i) - P_i P_i^T$:</p>
+
+    <figure class="wide">
+      <svg viewBox="0 0 460 185" style="max-width: 34rem;" role="img" aria-label="3 by 3 softmax Jacobian matrix. Diagonal entries are p_j times 1 minus p_j, off-diagonal entries are negative p_j times p_k.">
+        <!-- diagonal highlight -->
+        <rect x="60" y="30" width="110" height="45" style="fill: color-mix(in srgb, var(--text) 6%, transparent)"/>
+        <rect x="170" y="75" width="110" height="45" style="fill: color-mix(in srgb, var(--text) 6%, transparent)"/>
+        <rect x="280" y="120" width="110" height="45" style="fill: color-mix(in srgb, var(--text) 6%, transparent)"/>
+        <!-- grid -->
+        <rect class="cell" x="60" y="30" width="330" height="135"/>
+        <line x1="170" y1="30" x2="170" y2="165" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="280" y1="30" x2="280" y2="165" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="60" y1="75" x2="390" y2="75" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="60" y1="120" x2="390" y2="120" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <!-- col labels -->
+        <text class="addr" x="115" y="22">s₁</text>
+        <text class="addr" x="225" y="22">s₂</text>
+        <text class="addr" x="335" y="22">s₃</text>
+        <!-- row labels -->
+        <text class="addr" x="40" y="52">p₁</text>
+        <text class="addr" x="40" y="97">p₂</text>
+        <text class="addr" x="40" y="142">p₃</text>
+        <!-- row 1 -->
+        <text class="lbl" x="115" y="52">p₁(1&minus;p₁)</text>
+        <text class="addr" x="225" y="52">&minus;p₁p₂</text>
+        <text class="addr" x="335" y="52">&minus;p₁p₃</text>
+        <!-- row 2 -->
+        <text class="addr" x="115" y="97">&minus;p₂p₁</text>
+        <text class="lbl" x="225" y="97">p₂(1&minus;p₂)</text>
+        <text class="addr" x="335" y="97">&minus;p₂p₃</text>
+        <!-- row 3 -->
+        <text class="addr" x="115" y="142">&minus;p₃p₁</text>
+        <text class="addr" x="225" y="142">&minus;p₃p₂</text>
+        <text class="lbl" x="335" y="142">p₃(1&minus;p₃)</text>
+      </svg>
+      <figcaption>softmax Jacobian for one row &middot; diagonal p<sub>j</sub>(1&minus;p<sub>j</sub>) highlighted &middot; off-diagonal &minus;p<sub>j</sub>p<sub>k</sub></figcaption>
+    </figure>
+
+    <p>Now apply the chain rule. $dS_i = dP_i \cdot J_i$. Expand entry $j$ using the two cases above:</p>
+
+    $$dS_{ij} = \sum_k dP_{ik}\,J_{kj} = dP_{ij} \cdot P_{ij}(1-P_{ij}) - P_{ij}\!\sum_{k \neq j} dP_{ik}\,P_{ik}$$
+
+    $$= P_{ij}\!\left[dP_{ij} - \underbrace{\sum_k dP_{ik}\,P_{ik}}_{D_i}\right]$$
+
+    $$\boxed{dS_{ij} = P_{ij}(dP_{ij} - D_i)}$$
+
+    <p>where $D_i = \text{rowsum}(dP_i \odot P_i)$.</p>
+
+    <h3>The D Shortcut</h3>
+
+    <p>To compute $dS$ we need $dP$. That is the $N \times N$ matrix $dO \cdot V^T$. Storing it costs $O(N^2)$ memory. Same problem as standard attention all over again.</p>
+
+    <p>But look at $D_i$. It is just the dot product of two rows. We do not need the whole $dP$ matrix to get it. Plug in $dP_{ik} = \sum_m dO_{im}\,V_{km}$ where $m$ is the head dimension and watch what happens:</p>
+
+    $$D_i = \sum_k dP_{ik}\,P_{ik} = \sum_k \left(\sum_m dO_{im}\,V_{km}\right) P_{ik}$$
+
+    $$= \sum_m dO_{im} \underbrace{\left(\sum_k P_{ik}\,V_{km}\right)}_{O_{im}}$$
+
+    $$\boxed{D_i = \text{rowsum}(dO_i \odot O_i)}$$
+
+    <p>$dO$ comes from upstream. $O$ was already written to HBM during the forward pass. Both are sitting there. We never have to store $dP$ at all.</p>
+
+    <div class="aside"><p>So we have three things: $dV = P^T dO$, $dP = dO\,V^T$, and $dS_{ij} = P_{ij}(dP_{ij} - D_i)$ where $D_i = \text{rowsum}(dO_i \odot O_i)$. The algorithm section will show how to compute all of these block by block without any $N \times N$ matrix in memory.</p></div>
+
+    <h3>The Algorithm</h3>
+
+    <p>This is the actual FlashAttention-2 backward pass algorithm from the paper. It looks dense but do not be overwhelmed. We will explain every line.</p>
+
+    <figure>
+      <img src="fa2-backward.png" alt="FlashAttention-2 backward pass algorithm pseudocode">
+      <figcaption>Algorithm 2: FlashAttention-2 backward pass &middot; Dao, 2023</figcaption>
+    </figure>
 
   </div>
 </main>
