@@ -459,6 +459,16 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>The differences between them will be covered below.</p>
 
+    <h2>Road Map</h2>
+
+    <p>The rest of this post is split into two phases. Each phase starts with the math you need to understand it, then walks through the algorithm with a concrete example.</p>
+
+    <p><strong>Phase 1: Forward Pass.</strong> How Flash Attention computes the attention output in a single pass over the input, without ever writing the full $N \times N$ matrix to HBM.</p>
+
+    <p><strong>Phase 2: Backward Pass.</strong> How gradients flow back through the fused kernel, and why that requires a different trick than the forward pass.</p>
+
+    <p>If you get lost at any point, come back here and find where you are.</p>
+
   </div>
 </main>
 
