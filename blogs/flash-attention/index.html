@@ -322,6 +322,7 @@
   <div class="hero">
     <img src="hero.jpg" alt="A lone ship navigating stormy seas under a breaking sky">
   </div>
+  <p style="font-size:0.75rem;color:var(--subtext);text-align:center;margin-top:-2.5rem;margin-bottom:2.5rem;">Image via <a href="https://pin.it/4vEEQAcry" target="_blank" rel="noopener" style="color:var(--subtext);text-decoration:underline;">Pinterest</a></p>
 
   <pre style="background:var(--mantle);border:1px solid var(--surface);border-radius:6px;padding:1rem 1.25rem;overflow-x:auto;margin-bottom:2.5rem;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85rem;color:var(--green);"><span style="color:var(--overlay)"># flash attention</span>
 y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
@@ -492,7 +493,7 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <p>It looks innocent but has a problem. If the value $x_i$ in the array is large, then $e^{x_i}$ will be even larger. The exponents will explode, which leads to numerical instability: the values cannot be represented by float32 or float16.</p>
 
-    <p>So a safe way to do it is to divide both the numerator and denominator by a constant $c$:</p>
+    <p>So a safe way to do it is to multiply both the numerator and denominator by a constant $c$:</p>
 
     $$\frac{c \cdot e^{x_i}}{c \cdot \sum_{j=1}^{N} e^{x_j}} = \frac{e^{x_i + \log c}}{\sum_{j=1}^{N} e^{x_j + \log c}}$$
 
@@ -685,38 +686,113 @@ y = F.scaled_dot_product_attention(q, k, v, is_causal=True)</code></pre>
 
     <h3>The Algorithm</h3>
 
-    <p>Example: 8 tokens, embedding dim 128, block size $B_r = B_c = 2$, one attention head. This gives $T_r = 4$ row blocks and $T_c = 4$ column blocks.</p>
+    <p>This is the actual FlashAttention-2 forward pass algorithm from the paper. It looks dense but do not be overwhelmed. We will explain every line.</p>
 
-    <p>Divide the matrices into blocks. $Q \to Q_1, Q_2, Q_3, Q_4$ each of shape $2 \times 128$. Same for $K$ and $V$. Output $O$ is split the same way as $Q$.</p>
+    <figure>
+      <img src="fa2-algorithm.png" alt="FlashAttention-2 forward pass algorithm pseudocode">
+      <figcaption>Algorithm 1: FlashAttention-2 forward pass &middot; Dao, 2023</figcaption>
+    </figure>
 
-    <p>Initialize in SRAM for each row block:</p>
+    <p>Concrete example: $N = 8$ tokens, $d = 128$ embedding dim, block size $B_r = B_c = 2$, one head. $T_r = T_c = 4$.</p>
 
-    $$O_0 = \mathbf{0}_{2 \times 128}, \quad l_0 = \mathbf{0}_2, \quad m_0 = -\infty$$
+    <p><strong>1.</strong> Divide $Q$, $K$, $V$ into row blocks. Each is shape $(8, 128)$, split token-wise into 4 blocks of 2 rows. $Q \to Q_1, Q_2, Q_3, Q_4$ each $(2 \times 128)$. Same for $K$ and $V$. The split is always along the token dimension. $K_j$ is a $(2 \times 128)$ row slice, transposed to $(128 \times 2)$ for the dot product.</p>
 
-    <p><strong>Outer loop</strong> over $i = 1$ to $4$, one $Q_i$ block at a time. <strong>Inner loop</strong> over $j = 1$ to $4$, one $K_j$ block at a time. For each $(i, j)$:</p>
+    <figure class="wide">
+      <svg viewBox="0 0 270 160" style="max-width: 26rem;" role="img" aria-label="Q K V each split into 4 row blocks of 2 tokens by 128 dimensions">
+        <text class="lbl" x="40" y="14">Q</text>
+        <rect class="cell" x="10" y="20" width="60" height="120"/>
+        <line x1="10" y1="50" x2="70" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="10" y1="80" x2="70" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="10" y1="110" x2="70" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="40" y="35">Q₁</text>
+        <text class="addr" x="40" y="65">Q₂</text>
+        <text class="addr" x="40" y="95">Q₃</text>
+        <text class="addr" x="40" y="125">Q₄</text>
+        <text class="addr" x="40" y="153">2×128</text>
 
-    $$S_{ij} = Q_i K_j^T$$
-    $$m_{ij} = \max\!\left(\text{rowmax}(S_{ij}),\ m_{i,j-1}\right)$$
-    $$P_{ij} = \exp(S_{ij} - m_{ij})$$
-    $$l_{ij} = l_{i,j-1} \cdot e^{m_{i,j-1} - m_{ij}} + \text{rowsum}(P_{ij})$$
-    $$O_{ij} = \text{diag}\!\left(e^{m_{i,j-1} - m_{ij}}\right) O_{i,j-1} + P_{ij} V_j$$
+        <text class="lbl" x="140" y="14">K</text>
+        <rect class="cell" x="110" y="20" width="60" height="120"/>
+        <line x1="110" y1="50" x2="170" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="110" y1="80" x2="170" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="110" y1="110" x2="170" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="140" y="35">K₁</text>
+        <text class="addr" x="140" y="65">K₂</text>
+        <text class="addr" x="140" y="95">K₃</text>
+        <text class="addr" x="140" y="125">K₄</text>
+        <text class="addr" x="140" y="153">2×128</text>
 
-    <p>After the inner loop finishes, normalize and compute the log-sum-exp:</p>
+        <text class="lbl" x="240" y="14">V</text>
+        <rect class="cell" x="210" y="20" width="60" height="120"/>
+        <line x1="210" y1="50" x2="270" y2="50" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="210" y1="80" x2="270" y2="80" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <line x1="210" y1="110" x2="270" y2="110" stroke="var(--svg-cell)" stroke-width="0.6"/>
+        <text class="addr" x="240" y="35">V₁</text>
+        <text class="addr" x="240" y="65">V₂</text>
+        <text class="addr" x="240" y="95">V₃</text>
+        <text class="addr" x="240" y="125">V₄</text>
+        <text class="addr" x="240" y="153">2×128</text>
+      </svg>
+      <figcaption>Q, K, V split token-wise &middot; same split for all three</figcaption>
+    </figure>
 
-    $$O_i = \text{diag}(l_{i,T_c})^{-1} \cdot O_{i,T_c}$$
-    $$L_i = m_{i,T_c} + \log(l_{i,T_c})$$
+    <p><strong>2.</strong> $O$ is the output matrix, shape $(8, 128)$. Split the same way as $Q$: $O \to O_1, O_2, O_3, O_4$ each $(2 \times 128)$. This is where results land after each outer loop iteration.</p>
 
-    <p>Store $O_i$ and $L_i$ to HBM. Move to the next outer loop. After all $i$, return $O = [O_1, O_2, O_3, O_4]$ and $L = [L_1, L_2, L_3, L_4]$.</p>
+    <p><strong>3.</strong> The computation.</p>
+
+    <p>Outer loop over $i = 1$ to $4$, one $Q_i$ at a time. For each $i$, initialize in SRAM:</p>
+
+    $$O_0 = \underbrace{\begin{bmatrix} 0 & \cdots & 0 \\ 0 & \cdots & 0 \end{bmatrix}}_{2 \times 128} \qquad l_0 = \begin{bmatrix} 0 \\ 0 \end{bmatrix} \qquad m_0 = \begin{bmatrix} -\infty \\ -\infty \end{bmatrix}$$
+
+    <p>$m$ is a vector of shape $(2,)$: one running maximum per row. $l$ is the running normalization sum, same shape. Load $Q_i$ from HBM to SRAM and hold it for the full inner loop.</p>
+
+    <p>Inner loop over $j = 1$ to $4$, loading one $(K_j, V_j)$ pair each step.</p>
+
+    <p><strong>4. Inner loop $j = 1$.</strong></p>
+
+    $$S_{11} = Q_1 K_1^T \quad (2 \times 128) \cdot (128 \times 2) \to (2 \times 2)$$
+    $$m_{11} = \max(\text{rowmax}(S_{11}),\; m_0) = \text{rowmax}(S_{11})$$
+    $$P_{11} = \exp(S_{11} - m_{11})$$
+    $$l_{11} = \underbrace{l_0 \cdot e^{m_0 - m_{11}}}_{=\;0} + \text{rowsum}(P_{11}) = \text{rowsum}(P_{11})$$
+    $$O_{11} = \underbrace{\text{diag}(e^{m_0 - m_{11}}) \cdot O_0}_{=\;0} + P_{11} V_1 = P_{11} V_1$$
+
+    <p>$m_{11}$ is the largest score seen so far. It keeps the exponents from blowing up. $l_{11}$ is the running sum of the unnormalized weights, the partial denominator for softmax. We do not divide $P_{11}$ by $l_{11}$ right away because we have only seen $K_1$. The true normalizer sums over all four key blocks. Dividing now would give the wrong probabilities. We wait until step 6, when $l$ is complete.</p>
+
+    <div class="aside"><p>After $j = 1$: $O_{11}$, $l_{11}$, $m_{11}$ all in SRAM. Nothing written to HBM.</p></div>
+
+    <p><strong>5. Inner loop $j = 2$.</strong> Same five steps. $m_{12}$ may be larger than $m_{11}$, so the correction factor $e^{m_{11} - m_{12}}$ rescales the old $l$ and $O$ before the new contribution is added.</p>
+
+    $$S_{12} = Q_1 K_2^T \quad (2 \times 2)$$
+    $$m_{12} = \max(\text{rowmax}(S_{12}),\; m_{11})$$
+    $$P_{12} = \exp(S_{12} - m_{12})$$
+    $$l_{12} = l_{11} \cdot e^{m_{11} - m_{12}} + \text{rowsum}(P_{12})$$
+    $$O_{12} = \text{diag}(e^{m_{11} - m_{12}}) \cdot O_{11} + P_{12} V_2$$
+
+    <p>$j = 3$ and $j = 4$ follow the same pattern. Each step stays in SRAM.</p>
+
+    <p><strong>6. After the inner loop</strong> ($j = 4$). Normalize and compute the log-sum-exp:</p>
+
+    $$O_1 = \text{diag}(l_{14})^{-1} \cdot O_{14} \quad (2 \times 128)$$
+    $$L_1 = m_{14} + \log(l_{14}) \quad (2,)$$
+
+    <p>Write $O_1$ and $L_1$ to HBM. Two writes for the entire row block. Advance $i \to 2$, reinitialize, repeat.</p>
+
+    <p><strong>7. Return.</strong> After $i = 4$:</p>
+
+    $$O = \begin{bmatrix} O_1 \\ O_2 \\ O_3 \\ O_4 \end{bmatrix} \;\; (8 \times 128) \qquad L = \begin{bmatrix} L_1 \\ L_2 \\ L_3 \\ L_4 \end{bmatrix} \;\; (8,)$$
 
     <h3>The Correction Factor</h3>
 
-    <p>During the inner loop a new tile can reveal a larger maximum than before. The output accumulated so far used the wrong max. The correction factor fixes this.</p>
+    <p>Look at the $l$ and $O$ updates in step 5. Both have $e^{m_{11} - m_{12}}$ in them. That is the correction factor.</p>
 
-    <p>When $m_\text{new} > m_\text{old}$, scale down the old output before adding the new one:</p>
+    <p>When a new block brings a larger max, everything we accumulated before is wrong. It was built under the old max, not the real one. We scale it down before adding the new piece. Since $m_\text{old} \leq m_\text{new}$, the exponent is zero or negative, so $e^{m_\text{old} - m_\text{new}} \leq 1$. The old output shrinks. The new one comes in at the right scale. End result is the same as if we knew the global max from the start.</p>
 
-    $$O_\text{new} = \text{diag}\!\left(\exp(m_\text{old} - m_\text{new})\right) \cdot O_\text{old} + P_\text{new} V_\text{new}$$
+    <p>One more thing. $m$ has shape $(2,)$, so each row in the block has its own running max. The correction is per-row:</p>
 
-    <p>Since $m_\text{old} < m_\text{new}$ the exponent is negative, so the old output shrinks. The same thing happens to $l$. This is exactly the online softmax correction from the math prereqs, now applied block by block.</p>
+    $$\text{diag}\!\left(e^{m_\text{old} - m_\text{new}}\right) = \begin{bmatrix} e^{m_{\text{old},0} - m_{\text{new},0}} & 0 \\ 0 & e^{m_{\text{old},1} - m_{\text{new},1}} \end{bmatrix}$$
+
+    <p>Row 0 and row 1 can have different maxima, so they get corrected by different amounts. This is online softmax, now applied block by block.</p>
+
+    <p>That is the forward pass. We return $O = [O_1, O_2, O_3, O_4]$ of shape $(8 \times 128)$, the full attention output, and $L = [L_1, L_2, L_3, L_4]$ of shape $(8,)$, the log-sum-exp values. $L$ is not part of the attention result. It is saved specifically for the backward pass. In Phase 2 we will look at how gradients flow back through the fused kernel.</p>
 
   </div>
 </main>
